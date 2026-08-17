@@ -30,8 +30,8 @@ class BoxartGUI(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("GammaOS Boxart Tool %s" % __version__)
-        self.geometry("980x690")
-        self.minsize(860, 600)
+        self.geometry("980x660")
+        self.minsize(880, 600)
         self.configure(bg="#f7f7fc")
 
         self.adb = None
@@ -111,30 +111,39 @@ class BoxartGUI(tk.Tk):
         right = ttk.Frame(main, width=280)
         right.pack(side=tk.LEFT, fill=tk.Y, padx=(14, 0))
         right.pack_propagate(False)
+        # Fixed pixel-sized preview boxes (a Frame with pack_propagate off), so the
+        # layout never depends on text-line label sizing and the controls below are
+        # always visible on every platform.
         ttk.Label(right, text="Cover", style="Head.TLabel").pack(anchor="w")
-        self.preview = tk.Label(right, width=240, height=250, bg="#ffffff",
-                                relief="solid", bd=1, text="select a game", fg="#7c7a92")
-        self.preview.pack(pady=(6, 4), fill=tk.X)
+        cf = tk.Frame(right, width=236, height=188, bg="#ffffff", relief="solid", bd=1)
+        cf.pack(pady=(5, 3))
+        cf.pack_propagate(False)
+        self.preview = tk.Label(cf, bg="#ffffff", text="select a game", fg="#7c7a92")
+        self.preview.pack(fill=tk.BOTH, expand=True)
         self.btn_set = ttk.Button(right, text="Set / Replace Cover...", style="Accent.TButton",
                                   command=self.set_cover, state="disabled")
         self.btn_set.pack(fill=tk.X, pady=2)
 
-        ttk.Label(right, text="Background (fan art)", style="Head.TLabel").pack(anchor="w", pady=(10, 0))
-        self.fan_preview = tk.Label(right, width=240, height=120, bg="#ffffff",
-                                    relief="solid", bd=1, text="none", fg="#7c7a92")
-        self.fan_preview.pack(pady=(6, 4), fill=tk.X)
-        self.btn_setfan = ttk.Button(right, text="Set / Replace Background...",
+        ttk.Label(right, text="Background (fan art)", style="Head.TLabel").pack(anchor="w", pady=(8, 0))
+        ff = tk.Frame(right, width=236, height=104, bg="#ffffff", relief="solid", bd=1)
+        ff.pack(pady=(5, 3))
+        ff.pack_propagate(False)
+        self.fan_preview = tk.Label(ff, bg="#ffffff", text="none", fg="#7c7a92")
+        self.fan_preview.pack(fill=tk.BOTH, expand=True)
+        self.btn_setfan = ttk.Button(right, text="Set / Replace Background...", style="Accent.TButton",
                                      command=self.set_background, state="disabled")
         self.btn_setfan.pack(fill=tk.X, pady=2)
 
         self.sel_lbl = ttk.Label(right, text="", style="Dim.TLabel", wraplength=260, justify="left")
-        self.sel_lbl.pack(anchor="w", pady=(8, 6))
-        self.btn_save = ttk.Button(right, text="Save Cover As...",
-                                   command=self.save_cover_as, state="disabled")
-        self.btn_save.pack(fill=tk.X, pady=2)
-        self.btn_rm = ttk.Button(right, text="Remove...", command=self.remove_art_dialog,
+        self.sel_lbl.pack(anchor="w", pady=(6, 4))
+        rowf = ttk.Frame(right)
+        rowf.pack(fill=tk.X)
+        self.btn_save = ttk.Button(rowf, text="Save Cover...", command=self.save_cover_as,
+                                   state="disabled")
+        self.btn_save.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(0, 3))
+        self.btn_rm = ttk.Button(rowf, text="Remove...", command=self.remove_art_dialog,
                                  state="disabled")
-        self.btn_rm.pack(fill=tk.X, pady=2)
+        self.btn_rm.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(3, 0))
 
         # status bar
         self.status = ttk.Label(self, text="", style="Dim.TLabel", padding=(12, 6),
@@ -237,7 +246,7 @@ class BoxartGUI(tk.Tk):
         if not local or not os.path.isfile(local):
             target.config(image="", text=empty_text)
             return
-        maxsz = (240, 250) if attr == "_preview_img" else (240, 120)
+        maxsz = (230, 182) if attr == "_preview_img" else (230, 98)
         img = None
         if _HAVE_PIL:
             try:
