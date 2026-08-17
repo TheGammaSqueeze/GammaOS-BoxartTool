@@ -1,0 +1,2 @@
+# Optional: nicer cover previews in the GUI
+pillow>=9

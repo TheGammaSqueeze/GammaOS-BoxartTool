@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gammaos-boxart"
+version = "1.0.0"
+description = "View, replace, add and bulk manage GammaOS Nano game boxart over ADB (GUI + CLI)"
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "Apache-2.0" }
+authors = [{ name = "TheGammaSqueeze" }]
+keywords = ["gammaos", "nano", "boxart", "retro", "adb", "emulation"]
+
+[project.optional-dependencies]
+gui = ["pillow>=9"]
+
+[project.scripts]
+gammaos-boxart = "gammaos_boxart.cli:main"
+
+[project.gui-scripts]
+gammaos-boxart-gui = "gammaos_boxart.gui:main"
+
+[tool.setuptools]
+packages = ["gammaos_boxart"]
