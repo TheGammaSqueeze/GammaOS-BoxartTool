@@ -4,7 +4,7 @@ View, replace, add, and bulk manage **GammaOS Nano** game boxart from your compu
 
 GammaOS Nano has a built-in scraper and a per-game "Set Boxart" option, but there is no easy way to manage your covers in bulk, back them up, or drop in your own art from a PC. This tool does exactly that: it talks to the same on-device cover cache Nano uses, so anything you set here shows up in the XMB, DSi and Minima themes.
 
-![The GUI with a game selected](docs/gui.png)
+![The GUI with a game selected](https://raw.githubusercontent.com/TheGammaSqueeze/GammaOS-BoxartTool/main/docs/gui.png)
 
 ## What it does
 
@@ -50,7 +50,7 @@ Launch `gammaos-boxart-gui`. It connects to the first device, lists your games (
 
 ## CLI
 
-![CLI usage](docs/cli.png)
+![CLI usage](https://raw.githubusercontent.com/TheGammaSqueeze/GammaOS-BoxartTool/main/docs/cli.png)
 
 ```
 gammaos-boxart devices                      # list devices + root status
@@ -69,7 +69,7 @@ A ROM can be given as a full device path (`/storage/emulated/0/ROMs/nes/Game.nes
 
 Here is a tool-set cover rendering on the device, in the XMB theme:
 
-![Custom boxart on the device](docs/device.png)
+![Custom boxart on the device](https://raw.githubusercontent.com/TheGammaSqueeze/GammaOS-BoxartTool/main/docs/device.png)
 
 ## How it works
 
