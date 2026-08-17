@@ -15,6 +15,27 @@ GammaOS Nano has a built-in scraper and a per-game "Set Boxart" option, but ther
 - **Bulk import** a folder of covers, matched to your games by filename or by a manifest.
 - Works with the exact paths, hashing and JSON that Nano expects, so it is safe and reversible.
 
+## Download
+
+Prebuilt standalone binaries for **Windows, macOS and Linux** are on the [Releases page](https://github.com/TheGammaSqueeze/GammaOS-BoxartTool/releases). No Python needed: download the one for your system and run it.
+
+| System | File |
+|--------|------|
+| Windows (x64) | `gammaos-boxart-windows-x86_64.exe` |
+| macOS (Apple Silicon) | `gammaos-boxart-macos-arm64` |
+| macOS (Intel) | `gammaos-boxart-macos-x86_64` |
+| Linux (x64) | `gammaos-boxart-linux-x86_64` |
+
+Run it with **no arguments to open the GUI**, or pass a command (for example `list`) to use the CLI. You still need `adb` from [Android platform-tools](https://developer.android.com/tools/releases/platform-tools) on your PATH.
+
+The binaries are unsigned, so the first launch needs one extra step:
+
+- **Windows**: on the SmartScreen prompt, click "More info" then "Run anyway".
+- **macOS**: right-click the file and choose "Open" (or run `xattr -dr com.apple.quarantine gammaos-boxart-macos-*`), then `chmod +x` it.
+- **Linux**: `chmod +x gammaos-boxart-linux-x86_64` and run it.
+
+Prefer to run from source instead? See [Install](#install) below.
+
 ## Requirements
 
 - A GammaOS handheld running Nano, connected over USB with **USB debugging** enabled.

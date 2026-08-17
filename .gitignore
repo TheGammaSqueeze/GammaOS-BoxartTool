@@ -2,6 +2,8 @@ __pycache__/
 *.pyc
 build/
 dist/
+out/
+*.spec
 *.egg-info/
 .venv/
 export/
