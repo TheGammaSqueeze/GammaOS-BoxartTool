@@ -48,6 +48,13 @@ MASK64 = 0xFFFFFFFFFFFFFFFF
 
 DEFAULT_EXTS = [".zip", ".7z"]
 
+# The two kinds of art Nano stores per game. "box" is the cover/thumbnail;
+# "fan" is the fan art shown as the background / preview behind the game.
+ART = {
+    "box": {"field": "box", "ext": "box.png", "label": "cover"},
+    "fan": {"field": "fan", "ext": "fan.jpg", "label": "background"},
+}
+
 
 def cache_key(rom_path: str) -> str:
     """64-bit FNV-1a of the ROM path, 16 lowercase hex digits (Nano's scheme)."""
@@ -166,17 +173,21 @@ def _q(s):
 
 
 class Game:
-    __slots__ = ("rom", "system", "filename", "title", "box", "scraper", "when", "has_box")
+    __slots__ = ("rom", "system", "filename", "title", "box", "fan",
+                 "scraper", "when", "has_box", "has_fan")
 
-    def __init__(self, rom, system="", filename="", title="", box="", scraper="", when=0):
+    def __init__(self, rom, system="", filename="", title="", box="", fan="",
+                 scraper="", when=0):
         self.rom = rom
         self.system = system
         self.filename = filename or posixpath.basename(rom)
         self.title = title
         self.box = box
+        self.fan = fan
         self.scraper = scraper
         self.when = when
         self.has_box = bool(box)
+        self.has_fan = bool(fan)
 
     @property
     def display(self):
@@ -326,6 +337,7 @@ class Boxart:
                 continue
             g = Game(rom=rom, filename=posixpath.basename(rom),
                      title=it.get("title", ""), box=it.get("box", ""),
+                     fan=it.get("fan", ""),
                      scraper=it.get("scraper", ""), when=it.get("when", 0))
             g.system = _system_of(rom)
             by_rom[_norm(rom)] = g
@@ -351,25 +363,26 @@ class Boxart:
         return None
 
     # -- operations ---------------------------------------------------------
-    def get_cover(self, rom, out_path):
-        """Pull a game's current cover to a local file. Returns True on success."""
+    def get_art(self, rom, out_path, kind="box"):
+        """Pull a game's current cover or background to a local file."""
+        a = ART[kind]
         idx = self.read_index()
         it = self.find_entry(idx, rom)
-        box = it.get("box") if it else ""
-        if not box:
-            # fall back to the conventional path
-            box = "%s/%s.box.png" % (NANO_DIR, cache_key(self.canonical_rom(rom)))
-        if not self.adb.exists(box):
+        p = it.get(a["field"]) if it else ""
+        if not p:
+            p = "%s/%s.%s" % (NANO_DIR, cache_key(self.canonical_rom(rom)), a["ext"])
+        if not self.adb.exists(p):
             return False
-        self.adb.pull(box, out_path)
+        self.adb.pull(p, out_path)
         return True
 
-    def set_cover(self, rom, image_path, tmpdir, title=None):
-        """Add or replace a game's cover from a local image."""
+    def set_art(self, rom, image_path, tmpdir, kind="box", title=None):
+        """Add or replace a game's cover ('box') or background ('fan')."""
         if not os.path.isfile(image_path):
             raise AdbError("image not found: %s" % image_path)
+        a = ART[kind]
         rom = self.canonical_rom(rom)
-        dest = "%s/%s.box.png" % (NANO_DIR, cache_key(rom))
+        dest = "%s/%s.%s" % (NANO_DIR, cache_key(rom), a["ext"])
         self.adb.sh("mkdir -p %s" % _q(NANO_DIR), check=False)
         self.adb.put_file(image_path, dest)
         idx = self.read_index()
@@ -377,7 +390,7 @@ class Boxart:
         if it is None:
             it = {"rom": rom}
             idx["items"].append(it)
-        it["box"] = dest
+        it[a["field"]] = dest
         it["scraper"] = "manual"
         it["when"] = int(time.time())
         if title:
@@ -387,72 +400,92 @@ class Boxart:
         self.write_index(idx, tmpdir)
         return dest
 
-    def remove_cover(self, rom, tmpdir):
-        """Remove a game's cover file and manifest cover fields."""
+    def remove_art(self, rom, tmpdir, kind=None):
+        """Remove a game's cover, background, or both (kind=None)."""
         rom = self.canonical_rom(rom)
         idx = self.read_index()
         it = self.find_entry(idx, rom)
+        kinds = [kind] if kind else ["box", "fan"]
         removed = False
-        if it and it.get("box"):
-            self.adb.rm(it["box"])
-            removed = True
-        # also remove the conventional file
-        self.adb.rm("%s/%s.box.png" % (NANO_DIR, cache_key(rom)))
+        for k in kinds:
+            a = ART[k]
+            if it and it.get(a["field"]):
+                self.adb.rm(it[a["field"]])
+                removed = True
+            self.adb.rm("%s/%s.%s" % (NANO_DIR, cache_key(rom), a["ext"]))
+            if it:
+                it.pop(a["field"], None)
         if it:
-            it.pop("box", None)
-            meta = any(it.get(k) for k in ("fan", "desc", "genre", "players",
+            keep = any(it.get(x) for x in ("box", "fan", "desc", "genre", "players",
                                            "rating", "date", "dev", "pub"))
-            if not meta:
+            if not keep:
                 idx["items"] = [x for x in idx["items"] if x is not it]
             self.write_index(idx, tmpdir)
         return removed
 
+    # backward-compatible cover helpers
+    def get_cover(self, rom, out_path):
+        return self.get_art(rom, out_path, "box")
+
+    def set_cover(self, rom, image_path, tmpdir, title=None):
+        return self.set_art(rom, image_path, tmpdir, "box", title)
+
+    def remove_cover(self, rom, tmpdir):
+        return self.remove_art(rom, tmpdir, "box")
+
     def export_all(self, out_dir, progress=None):
-        """Pull every cover into out_dir/<system>/<romname>.png plus a manifest."""
+        """
+        Pull every cover and background into out_dir/<system>/ plus a manifest.
+        Covers are <name>.png, backgrounds are <name>.fan.png.
+        """
         os.makedirs(out_dir, exist_ok=True)
         idx = self.read_index()
-        manifest = {"version": 1, "covers": []}
-        items = [it for it in idx.get("items", []) if it.get("box")]
+        manifest = {"version": 2, "covers": []}
+        items = [it for it in idx.get("items", []) if it.get("box") or it.get("fan")]
         for i, it in enumerate(items):
             rom = it["rom"]
             sysname = _system_of(rom)
             base = os.path.splitext(posixpath.basename(rom))[0]
             sysdir = os.path.join(out_dir, _safe(sysname))
             os.makedirs(sysdir, exist_ok=True)
-            local = os.path.join(sysdir, _safe(base) + ".png")
-            ok = self.adb.exists(it["box"])
-            if ok:
+            entry = {"rom": rom, "system": sysname, "title": it.get("title", "")}
+            if it.get("box") and self.adb.exists(it["box"]):
+                local = os.path.join(sysdir, _safe(base) + ".png")
                 self.adb.pull(it["box"], local)
-                manifest["covers"].append({
-                    "rom": rom, "system": sysname,
-                    "file": os.path.relpath(local, out_dir),
-                    "title": it.get("title", ""),
-                })
+                entry["box"] = os.path.relpath(local, out_dir)
+            if it.get("fan") and self.adb.exists(it["fan"]):
+                local = os.path.join(sysdir, _safe(base) + ".fan.png")
+                self.adb.pull(it["fan"], local)
+                entry["fan"] = os.path.relpath(local, out_dir)
+            if entry.get("box") or entry.get("fan"):
+                manifest["covers"].append(entry)
             if progress:
                 progress(i + 1, len(items), rom)
         with open(os.path.join(out_dir, "boxart_manifest.json"), "w", encoding="utf-8") as f:
             json.dump(manifest, f, ensure_ascii=False, indent=1)
         return len(manifest["covers"])
 
-    def import_dir(self, in_dir, tmpdir, mode="filename", progress=None):
+    def import_dir(self, in_dir, tmpdir, mode="auto", progress=None):
         """
-        Bulk import covers. Two modes:
+        Bulk import covers and backgrounds. Two modes:
           manifest: read boxart_manifest.json (from export) and re-apply by rom.
-          filename: match images to games by base filename, across systems, using
-                    the current device library.
+          filename: match images to games by base filename. A file named
+                    <name>.fan.<ext> sets the background; otherwise the cover.
         Returns (applied, skipped).
         """
-        pairs = []  # (rom, image_local, title)
+        jobs = []  # (rom, image_local, kind, title)
         man = os.path.join(in_dir, "boxart_manifest.json")
         if mode == "manifest" or (mode == "auto" and os.path.isfile(man)):
             with open(man, encoding="utf-8") as f:
                 m = json.load(f)
             for c in m.get("covers", []):
-                img = os.path.join(in_dir, c["file"])
-                if os.path.isfile(img):
-                    pairs.append((c["rom"], img, c.get("title", "")))
+                for kind in ("box", "fan"):
+                    rel = c.get(kind) or (c.get("file") if kind == "box" else None)
+                    if rel:
+                        img = os.path.join(in_dir, rel)
+                        if os.path.isfile(img):
+                            jobs.append((c["rom"], img, kind, c.get("title", "")))
         else:
-            # filename match against the device library
             lib = {}
             for g in self.list_games(include_all=True):
                 lib.setdefault(os.path.splitext(g.filename)[0].lower(), g.rom)
@@ -461,15 +494,19 @@ class Boxart:
                     stem, ext = os.path.splitext(fn)
                     if ext.lower() not in (".png", ".jpg", ".jpeg", ".webp", ".bmp"):
                         continue
+                    kind = "box"
+                    if stem.lower().endswith(".fan"):
+                        kind = "fan"
+                        stem = stem[:-4]
                     rom = lib.get(stem.lower())
                     if rom:
-                        pairs.append((rom, os.path.join(root, fn), ""))
+                        jobs.append((rom, os.path.join(root, fn), kind, ""))
         applied = 0
-        for i, (rom, img, title) in enumerate(pairs):
-            self.set_cover(rom, img, tmpdir, title=title or None)
+        for i, (rom, img, kind, title) in enumerate(jobs):
+            self.set_art(rom, img, tmpdir, kind=kind, title=title or None)
             applied += 1
             if progress:
-                progress(i + 1, len(pairs), rom)
+                progress(i + 1, len(jobs), rom)
         return applied, 0
 
 

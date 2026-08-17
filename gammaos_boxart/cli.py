@@ -5,7 +5,7 @@ import os
 import sys
 import tempfile
 
-from .core import Adb, AdbError, Boxart, cache_key, NANO_DIR
+from .core import Adb, AdbError, Boxart, cache_key, NANO_DIR, ART
 
 
 def _adb(args):
@@ -52,21 +52,24 @@ def cmd_list(args):
 
 def cmd_get(args):
     bx = Boxart(_adb(args))
-    out = args.out or (os.path.splitext(os.path.basename(args.rom))[0] + ".png")
-    if bx.get_cover(args.rom, out):
-        print("saved current cover -> %s" % out)
+    kind = "fan" if args.fan else "box"
+    suffix = ".fan.png" if args.fan else ".png"
+    out = args.out or (os.path.splitext(os.path.basename(args.rom))[0] + suffix)
+    if bx.get_art(args.rom, out, kind):
+        print("saved current %s -> %s" % (ART[kind]["label"], out))
     else:
-        _die("no cover on the device for %s" % args.rom)
+        _die("no %s on the device for %s" % (ART[kind]["label"], args.rom))
 
 
 def cmd_set(args):
     bx = Boxart(_adb(args))
+    kind = "fan" if args.fan else "box"
     with tempfile.TemporaryDirectory() as td:
         rom = bx.canonical_rom(args.rom)
-        dest = bx.set_cover(rom, args.image, td, title=args.title)
+        dest = bx.set_art(rom, args.image, td, kind=kind, title=args.title)
         print("rom : %s" % rom)
         print("key : %s" % cache_key(rom))
-        print("cover -> %s" % dest)
+        print("%s -> %s" % (ART[kind]["label"], dest))
         if not args.no_restart:
             bx.adb.restart_nano()
             print("restarted Nano")
@@ -76,9 +79,11 @@ def cmd_set(args):
 
 def cmd_remove(args):
     bx = Boxart(_adb(args))
+    kind = None if args.both else ("fan" if args.fan else "box")
+    what = "cover and background" if kind is None else ART[kind]["label"]
     with tempfile.TemporaryDirectory() as td:
-        ok = bx.remove_cover(args.rom, td)
-        print("removed cover" if ok else "no cover was set")
+        ok = bx.remove_art(args.rom, td, kind=kind)
+        print("removed %s" % what if ok else "nothing was set")
         if not args.no_restart:
             bx.adb.restart_nano()
             print("restarted Nano")
@@ -142,20 +147,24 @@ def build_parser():
     p.add_argument("--with-boxart-only", action="store_true", help="only games that already have a cover")
     p.set_defaults(func=cmd_list)
 
-    p = sub.add_parser("get", help="save a game's current cover to a local file")
+    p = sub.add_parser("get", help="save a game's current cover (or --fan background) to a file")
     p.add_argument("rom", help="ROM path (e.g. /storage/emulated/0/ROMs/nes/Game.nes) or 'system/file'")
     p.add_argument("-o", "--out", help="output image path")
+    p.add_argument("--fan", action="store_true", help="the background/preview (fan art) instead of the cover")
     p.set_defaults(func=cmd_get)
 
-    p = sub.add_parser("set", help="add or replace a game's cover from a local image")
+    p = sub.add_parser("set", help="add or replace a game's cover (or --fan background)")
     p.add_argument("rom", help="ROM path or 'system/file'")
     p.add_argument("image", help="local image file (png/jpg/...)")
+    p.add_argument("--fan", action="store_true", help="set the background/preview (fan art) instead of the cover")
     p.add_argument("--title", help="also set the displayed title")
     p.add_argument("--no-restart", action="store_true", help="do not restart Nano afterwards")
     p.set_defaults(func=cmd_set)
 
-    p = sub.add_parser("remove", help="remove a game's custom cover")
+    p = sub.add_parser("remove", help="remove a game's custom cover (or --fan background)")
     p.add_argument("rom", help="ROM path or 'system/file'")
+    p.add_argument("--fan", action="store_true", help="remove the background (fan art) instead of the cover")
+    p.add_argument("--both", action="store_true", help="remove both the cover and the background")
     p.add_argument("--no-restart", action="store_true")
     p.set_defaults(func=cmd_remove)
 

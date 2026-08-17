@@ -30,14 +30,15 @@ class BoxartGUI(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("GammaOS Boxart Tool %s" % __version__)
-        self.geometry("980x620")
-        self.minsize(860, 540)
+        self.geometry("980x690")
+        self.minsize(860, 600)
         self.configure(bg="#f7f7fc")
 
         self.adb = None
         self.bx = None
         self.games = []
         self._preview_img = None
+        self._fan_img = None
         self._tmp = tempfile.mkdtemp(prefix="gbt_gui_")
         self._busy = False
 
@@ -110,22 +111,30 @@ class BoxartGUI(tk.Tk):
         right = ttk.Frame(main, width=280)
         right.pack(side=tk.LEFT, fill=tk.Y, padx=(14, 0))
         right.pack_propagate(False)
-        ttk.Label(right, text="Cover preview", style="Head.TLabel").pack(anchor="w")
-        self.preview = tk.Label(right, width=240, height=300, bg="#ffffff",
-                                relief="solid", bd=1, text="select a game",
-                                fg="#7c7a92")
-        self.preview.pack(pady=10, fill=tk.X)
-        self.sel_lbl = ttk.Label(right, text="", style="Dim.TLabel", wraplength=260, justify="left")
-        self.sel_lbl.pack(anchor="w", pady=(0, 10))
+        ttk.Label(right, text="Cover", style="Head.TLabel").pack(anchor="w")
+        self.preview = tk.Label(right, width=240, height=250, bg="#ffffff",
+                                relief="solid", bd=1, text="select a game", fg="#7c7a92")
+        self.preview.pack(pady=(6, 4), fill=tk.X)
         self.btn_set = ttk.Button(right, text="Set / Replace Cover...", style="Accent.TButton",
                                   command=self.set_cover, state="disabled")
-        self.btn_set.pack(fill=tk.X, pady=3)
-        self.btn_save = ttk.Button(right, text="Save Current Cover As...",
+        self.btn_set.pack(fill=tk.X, pady=2)
+
+        ttk.Label(right, text="Background (fan art)", style="Head.TLabel").pack(anchor="w", pady=(10, 0))
+        self.fan_preview = tk.Label(right, width=240, height=120, bg="#ffffff",
+                                    relief="solid", bd=1, text="none", fg="#7c7a92")
+        self.fan_preview.pack(pady=(6, 4), fill=tk.X)
+        self.btn_setfan = ttk.Button(right, text="Set / Replace Background...",
+                                     command=self.set_background, state="disabled")
+        self.btn_setfan.pack(fill=tk.X, pady=2)
+
+        self.sel_lbl = ttk.Label(right, text="", style="Dim.TLabel", wraplength=260, justify="left")
+        self.sel_lbl.pack(anchor="w", pady=(8, 6))
+        self.btn_save = ttk.Button(right, text="Save Cover As...",
                                    command=self.save_cover_as, state="disabled")
-        self.btn_save.pack(fill=tk.X, pady=3)
-        self.btn_rm = ttk.Button(right, text="Remove Cover", command=self.remove_cover,
+        self.btn_save.pack(fill=tk.X, pady=2)
+        self.btn_rm = ttk.Button(right, text="Remove...", command=self.remove_art_dialog,
                                  state="disabled")
-        self.btn_rm.pack(fill=tk.X, pady=3)
+        self.btn_rm.pack(fill=tk.X, pady=2)
 
         # status bar
         self.status = ttk.Label(self, text="", style="Dim.TLabel", padding=(12, 6),
@@ -199,70 +208,106 @@ class BoxartGUI(tk.Tk):
         if not g:
             return
         self.btn_set.config(state="normal")
-        self.btn_rm.config(state="normal" if g.has_box else "disabled")
+        self.btn_setfan.config(state="normal")
+        self.btn_rm.config(state="normal" if (g.has_box or g.has_fan) else "disabled")
         self.btn_save.config(state="normal" if g.has_box else "disabled")
-        self.sel_lbl.config(text="%s\n%s\n%s" % (
-            g.display, g.system,
-            ("cover: " + os.path.basename(g.box)) if g.box else "no cover"))
+        self.sel_lbl.config(text="%s\n%s\ncover: %s   background: %s" % (
+            g.display, g.system, "yes" if g.has_box else "no",
+            "yes" if g.has_fan else "no"))
         self.preview.config(image="", text="loading..." if g.has_box else "no cover")
+        self.fan_preview.config(image="", text="loading..." if g.has_fan else "none")
         self._preview_img = None
+        self._fan_img = None
         if g.has_box:
-            self._run("Loading cover...", lambda: self._load_preview(g), busy_ui=False)
+            self._run("Loading cover...",
+                      lambda: self._load_art(g, "box", self.preview, "_preview_img"),
+                      busy_ui=False)
+        if g.has_fan:
+            self._run("Loading background...",
+                      lambda: self._load_art(g, "fan", self.fan_preview, "_fan_img"),
+                      busy_ui=False)
 
-    def _load_preview(self, g):
-        local = os.path.join(self._tmp, "prev.img")
-        ok = self.bx.get_cover(g.rom, local)
-        self.after(0, lambda: self._show_preview(local if ok else None))
+    def _load_art(self, g, kind, target, attr):
+        local = os.path.join(self._tmp, "prev_%s.img" % kind)
+        ok = self.bx.get_art(g.rom, local, kind)
+        empty = "no cover" if kind == "box" else "none"
+        self.after(0, lambda: self._show_art(local if ok else None, target, attr, empty))
 
-    def _show_preview(self, local):
+    def _show_art(self, local, target, attr, empty_text):
         if not local or not os.path.isfile(local):
-            self.preview.config(image="", text="no cover")
+            target.config(image="", text=empty_text)
             return
+        maxsz = (240, 250) if attr == "_preview_img" else (240, 120)
+        img = None
         if _HAVE_PIL:
             try:
                 im = Image.open(local)
-                im.thumbnail((240, 300))
-                self._preview_img = ImageTk.PhotoImage(im)
-                self.preview.config(image=self._preview_img, text="")
-                return
+                im.thumbnail(maxsz)
+                img = ImageTk.PhotoImage(im)
             except Exception:
-                pass
-        try:
-            self._preview_img = tk.PhotoImage(file=local)
-            self.preview.config(image=self._preview_img, text="")
-        except Exception:
-            self.preview.config(image="", text="(cover set; install Pillow to preview)")
+                img = None
+        if img is None:
+            try:
+                img = tk.PhotoImage(file=local)
+            except Exception:
+                target.config(image="", text="(set; install Pillow to preview)")
+                return
+        setattr(self, attr, img)
+        target.config(image=img, text="")
 
     # -- actions ------------------------------------------------------------
     def set_cover(self):
+        self._pick_and_set("box", "cover image")
+
+    def set_background(self):
+        self._pick_and_set("fan", "background (fan art) image")
+
+    def _pick_and_set(self, kind, what):
         g = self._selected_game()
         if not g:
             return
         img = filedialog.askopenfilename(
-            title="Choose a cover image for %s" % g.display,
+            title="Choose a %s for %s" % (what, g.display),
             filetypes=[("Images", "*.png *.jpg *.jpeg *.webp *.bmp"), ("All files", "*.*")])
         if not img:
             return
-        self._run("Setting cover + restarting Nano...", lambda: self._do_set(g, img))
+        self._run("Setting %s + restarting Nano..." % kind, lambda: self._do_set(g, img, kind))
 
-    def _do_set(self, g, img):
+    def _do_set(self, g, img, kind):
         with tempfile.TemporaryDirectory() as td:
-            self.bx.set_cover(g.rom, img, td)
+            self.bx.set_art(g.rom, img, td, kind=kind)
         self.bx.adb.restart_nano()
         self.after(0, self.refresh)
-        self.after(0, lambda: self._set_status("Set cover for %s" % g.display))
+        self.after(0, lambda: self._set_status("Set %s for %s" % (
+            "background" if kind == "fan" else "cover", g.display)))
 
-    def remove_cover(self):
+    def remove_art_dialog(self):
         g = self._selected_game()
-        if not g or not g.has_box:
+        if not g or not (g.has_box or g.has_fan):
             return
-        if not messagebox.askyesno("Remove cover", "Remove the cover for %s?" % g.display):
-            return
-        self._run("Removing cover...", lambda: self._do_remove(g))
+        win = tk.Toplevel(self)
+        win.title("Remove")
+        win.transient(self)
+        win.grab_set()
+        ttk.Label(win, text="Remove for %s:" % g.display, padding=14).pack()
+        fr = ttk.Frame(win, padding=(14, 0, 14, 14))
+        fr.pack()
 
-    def _do_remove(self, g):
+        def do(kind):
+            win.destroy()
+            self._run("Removing + restarting Nano...", lambda: self._do_remove(g, kind))
+
+        if g.has_box:
+            ttk.Button(fr, text="Cover", command=lambda: do("box")).pack(side=tk.LEFT, padx=4)
+        if g.has_fan:
+            ttk.Button(fr, text="Background", command=lambda: do("fan")).pack(side=tk.LEFT, padx=4)
+        if g.has_box and g.has_fan:
+            ttk.Button(fr, text="Both", command=lambda: do(None)).pack(side=tk.LEFT, padx=4)
+        ttk.Button(fr, text="Cancel", command=win.destroy).pack(side=tk.LEFT, padx=4)
+
+    def _do_remove(self, g, kind):
         with tempfile.TemporaryDirectory() as td:
-            self.bx.remove_cover(g.rom, td)
+            self.bx.remove_art(g.rom, td, kind=kind)
         self.bx.adb.restart_nano()
         self.after(0, self.refresh)
 
