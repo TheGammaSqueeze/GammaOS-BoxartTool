@@ -141,6 +141,20 @@ class Adb:
         out = self.sh("stat -c %%U:%%G %s" % _q(path), check=False).strip()
         return out if ":" in out else "root:root"
 
+    def file_size(self, path):
+        out = self.sh("stat -c %%s %s 2>/dev/null || echo 0" % _q(path), check=False).strip()
+        try:
+            return int(out.split()[0])
+        except (ValueError, IndexError):
+            return 0
+
+    def read_rom_head(self, path, cap_mb=128):
+        """Read up to cap_mb of a ROM (for a CRC32 match). Exact CRC for smaller files."""
+        return self.raw(
+            ["exec-out", "dd if=%s bs=1048576 count=%d 2>/dev/null" % (_q(path), cap_mb)],
+            binary=True, check=False, timeout=300,
+        )
+
     def pull(self, remote, local):
         os.makedirs(os.path.dirname(os.path.abspath(local)) or ".", exist_ok=True)
         self.raw(["pull", remote, local])
@@ -376,7 +390,7 @@ class Boxart:
         self.adb.pull(p, out_path)
         return True
 
-    def set_art(self, rom, image_path, tmpdir, kind="box", title=None):
+    def set_art(self, rom, image_path, tmpdir, kind="box", title=None, scraper="manual"):
         """Add or replace a game's cover ('box') or background ('fan')."""
         if not os.path.isfile(image_path):
             raise AdbError("image not found: %s" % image_path)
@@ -391,7 +405,7 @@ class Boxart:
             it = {"rom": rom}
             idx["items"].append(it)
         it[a["field"]] = dest
-        it["scraper"] = "manual"
+        it["scraper"] = scraper
         it["when"] = int(time.time())
         if title:
             it["title"] = title
@@ -508,6 +522,79 @@ class Boxart:
             if progress:
                 progress(i + 1, len(jobs), rom)
         return applied, 0
+
+
+    # -- scraping (ScreenScraper via the PC) -------------------------------
+    def scrape_game(self, rom, scraper, tmpdir, want_box=True, want_fan=True,
+                    overwrite=False, use_crc=True, title_override=None):
+        """
+        Scrape one game on the PC and push the art to the device. Returns a small
+        dict: {"matched", "box", "fan", "title", "skipped", "error"}.
+        scraper is a gammaos_boxart.scraper.ScreenScraper instance.
+        """
+        rom = self.canonical_rom(rom)
+        romdir = _system_of(rom)
+        romnom = posixpath.basename(rom)
+
+        if not overwrite:
+            idx = self.read_index()
+            it = self.find_entry(idx, rom)
+            have_box = bool(it and it.get("box") and self.adb.exists(it["box"]))
+            have_fan = bool(it and it.get("fan") and self.adb.exists(it["fan"]))
+            want_box = want_box and not have_box
+            want_fan = want_fan and not have_fan
+            if not want_box and not want_fan:
+                return {"matched": False, "skipped": True, "box": False,
+                        "fan": False, "title": "", "error": ""}
+
+        crc = None
+        size = self.adb.file_size(rom)
+        if use_crc and 0 < size <= 128 * 1024 * 1024:
+            from .scraper import crc32_hex
+            crc = crc32_hex(self.adb.read_rom_head(rom))
+
+        result = scraper.scrape(title_override or romnom, romdir, crc=crc, size=size or None,
+                                want_box=want_box, want_fan=want_fan)
+        out = {"matched": result.matched, "skipped": False, "box": False,
+               "fan": False, "title": result.title, "error": result.error}
+        if not result.matched:
+            return out
+        for kind, data in (("box", result.box), ("fan", result.fan)):
+            if not data:
+                continue
+            local = os.path.join(tmpdir, "%s.%s" % (cache_key(rom), ART[kind]["ext"]))
+            with open(local, "wb") as f:
+                f.write(data)
+            self.set_art(rom, local, tmpdir, kind=kind,
+                         title=result.title or None, scraper="screenscraper")
+            out[kind] = True
+        return out
+
+    def scrape_missing(self, scraper, tmpdir, systems=None, want_box=True,
+                       want_fan=True, overwrite=False, use_crc=True, progress=None):
+        """
+        Scrape every game (optionally limited to a set of system names/romDirs).
+        By default only games missing the requested art are scraped; overwrite
+        re-scrapes all. Returns (matched, scanned).
+        """
+        games = self.list_games(include_all=True)
+        if systems:
+            want = set(s.lower() for s in systems)
+            games = [g for g in games
+                     if g.system.lower() in want or _system_of(g.rom).lower() in want]
+        matched = 0
+        for i, g in enumerate(games):
+            try:
+                r = self.scrape_game(g.rom, scraper, tmpdir, want_box=want_box,
+                                     want_fan=want_fan, overwrite=overwrite,
+                                     use_crc=use_crc)
+                if r.get("box") or r.get("fan"):
+                    matched += 1
+            except Exception as e:
+                r = {"error": str(e)}
+            if progress:
+                progress(i + 1, len(games), g.display, r)
+        return matched, len(games)
 
 
 def _norm(rom):

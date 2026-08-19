@@ -6,6 +6,7 @@ import sys
 import tempfile
 
 from .core import Adb, AdbError, Boxart, cache_key, NANO_DIR, ART
+from .scraper import ScreenScraper, ScrapeError
 
 
 def _adb(args):
@@ -105,6 +106,77 @@ def cmd_import(args):
             print("restarted Nano")
 
 
+def _scraper(args):
+    ss = ScreenScraper(
+        ssid=getattr(args, "ss_user", None),
+        sspassword=getattr(args, "ss_pass", None),
+        region=getattr(args, "region", "wor"),
+    )
+    if not ss.has_dev_creds:
+        _die("no ScreenScraper credentials. This build has no built-in developer "
+             "account; pass your own with --ss-user and --ss-pass.")
+    return ss
+
+
+def _art_flags(args):
+    if args.covers_only:
+        return True, False
+    if args.bg_only:
+        return False, True
+    return True, True
+
+
+def cmd_scrape(args):
+    bx = Boxart(_adb(args))
+    ss = _scraper(args)
+    want_box, want_fan = _art_flags(args)
+    with tempfile.TemporaryDirectory() as td:
+        rom = bx.canonical_rom(args.rom)
+        r = bx.scrape_game(rom, ss, td, want_box=want_box, want_fan=want_fan,
+                           overwrite=args.overwrite, use_crc=not args.no_crc,
+                           title_override=args.title)
+        if r.get("skipped"):
+            print("already has art (use --overwrite to re-scrape): %s" % rom)
+        elif not r.get("matched"):
+            print("no match on ScreenScraper for %s (%s)" % (os.path.basename(rom), r.get("error") or ""))
+        else:
+            got = [k for k in ("box", "fan") if r.get(k)]
+            print("matched '%s' -> %s" % (r.get("title") or "?",
+                                          ", ".join(ART[k]["label"] for k in got) or "no new art"))
+        if (r.get("box") or r.get("fan")) and not args.no_restart:
+            bx.adb.restart_nano()
+            print("restarted Nano")
+
+
+def cmd_scrape_all(args):
+    bx = Boxart(_adb(args))
+    ss = _scraper(args)
+    want_box, want_fan = _art_flags(args)
+    systems = [args.system] if args.system else None
+
+    def prog(done, total, name, r):
+        if r.get("box") or r.get("fan"):
+            tag = "ok"
+        elif r.get("skipped"):
+            tag = "skip"
+        elif "matched" not in r:
+            tag = "err"          # raised exception (r has only "error")
+        else:
+            tag = "miss"         # queried, no match / no usable media
+        sys.stdout.write("\rscrape %3d%% (%d/%d) [%-4s] %-30.30s" %
+                         (int(done * 100 / max(total, 1)), done, total, tag, name))
+        sys.stdout.flush()
+
+    with tempfile.TemporaryDirectory() as td:
+        matched, scanned = bx.scrape_missing(
+            ss, td, systems=systems, want_box=want_box, want_fan=want_fan,
+            overwrite=args.overwrite, use_crc=not args.no_crc, progress=prog)
+    print("\nscraped art for %d of %d games" % (matched, scanned))
+    if matched and not args.no_restart:
+        bx.adb.restart_nano()
+        print("restarted Nano")
+
+
 def cmd_restart(args):
     _adb(args).restart_nano()
     print("restarted Nano")
@@ -179,6 +251,28 @@ def build_parser():
     p.add_argument("--no-restart", action="store_true")
     p.set_defaults(func=cmd_import)
 
+    def _add_scrape_opts(p):
+        p.add_argument("--region", default="wor",
+                       help="preferred region (default world): wor/world, us, eu, jp")
+        p.add_argument("--ss-user", help="your ScreenScraper username (optional, for quota)")
+        p.add_argument("--ss-pass", help="your ScreenScraper password (optional, for quota)")
+        p.add_argument("--covers-only", action="store_true", help="only fetch covers")
+        p.add_argument("--bg-only", action="store_true", help="only fetch backgrounds (fan art)")
+        p.add_argument("--overwrite", action="store_true", help="re-scrape games that already have art")
+        p.add_argument("--no-crc", action="store_true", help="match by filename only (skip the CRC read)")
+        p.add_argument("--no-restart", action="store_true")
+
+    p = sub.add_parser("scrape", help="scrape cover + background for one game from ScreenScraper")
+    p.add_argument("rom", help="ROM path or 'system/file'")
+    p.add_argument("--title", help="search by this title instead of the filename")
+    _add_scrape_opts(p)
+    p.set_defaults(func=cmd_scrape)
+
+    p = sub.add_parser("scrape-all", help="scrape art for the whole library (or one system)")
+    p.add_argument("system", nargs="?", help="optional system to limit to (e.g. nes)")
+    _add_scrape_opts(p)
+    p.set_defaults(func=cmd_scrape_all)
+
     sub.add_parser("restart", help="restart Nano so on-disk changes load").set_defaults(func=cmd_restart)
 
     p = sub.add_parser("info", help="show the cache location and a rom's cache key")
@@ -192,7 +286,7 @@ def main(argv=None):
     args = ap.parse_args(argv)
     try:
         args.func(args)
-    except AdbError as e:
+    except (AdbError, ScrapeError) as e:
         _die(str(e))
     except KeyboardInterrupt:
         sys.exit(130)

@@ -14,6 +14,9 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 
 from .core import Adb, AdbError, Boxart
+from .scraper import ScreenScraper, ScrapeError
+
+REGION_CHOICES = [("World", "wor"), ("USA", "us"), ("Europe", "eu"), ("Japan", "jp")]
 
 try:
     from PIL import Image, ImageTk
@@ -30,9 +33,13 @@ class BoxartGUI(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("GammaOS Boxart Tool %s" % __version__)
-        self.geometry("980x660")
-        self.minsize(880, 600)
+        self.geometry("1040x790")
+        self.minsize(940, 720)
         self.configure(bg="#f7f7fc")
+
+        self.region_var = tk.StringVar(value="World")
+        self.ss_user = ""
+        self.ss_pass = ""
 
         self.adb = None
         self.bx = None
@@ -72,6 +79,8 @@ class BoxartGUI(tk.Tk):
         ttk.Button(top, text="Restart Nano", command=self.restart_nano).pack(side=tk.RIGHT)
         ttk.Button(top, text="Bulk Export...", command=self.bulk_export).pack(side=tk.RIGHT, padx=6)
         ttk.Button(top, text="Bulk Import...", command=self.bulk_import).pack(side=tk.RIGHT)
+        ttk.Button(top, text="Scrape Library...", style="Accent.TButton",
+                   command=self.scrape_library).pack(side=tk.RIGHT, padx=6)
         ttk.Button(top, text="Refresh", command=self.refresh).pack(side=tk.RIGHT, padx=6)
 
         # filter
@@ -144,6 +153,18 @@ class BoxartGUI(tk.Tk):
         self.btn_rm = ttk.Button(rowf, text="Remove...", command=self.remove_art_dialog,
                                  state="disabled")
         self.btn_rm.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(3, 0))
+
+        ttk.Separator(right, orient="horizontal").pack(fill=tk.X, pady=(12, 8))
+        ttk.Label(right, text="Scrape from ScreenScraper", style="Head.TLabel").pack(anchor="w")
+        srow = ttk.Frame(right)
+        srow.pack(fill=tk.X, pady=(4, 2))
+        ttk.Label(srow, text="Region:").pack(side=tk.LEFT)
+        ttk.Combobox(srow, textvariable=self.region_var, state="readonly", width=9,
+                     values=[r[0] for r in REGION_CHOICES]).pack(side=tk.LEFT, padx=6)
+        ttk.Button(srow, text="Account...", command=self.ss_account_dialog).pack(side=tk.RIGHT)
+        self.btn_scrape = ttk.Button(right, text="Scrape This Game", style="Accent.TButton",
+                                     command=self.scrape_selected, state="disabled")
+        self.btn_scrape.pack(fill=tk.X, pady=2)
 
         # status bar
         self.status = ttk.Label(self, text="", style="Dim.TLabel", padding=(12, 6),
@@ -218,6 +239,7 @@ class BoxartGUI(tk.Tk):
             return
         self.btn_set.config(state="normal")
         self.btn_setfan.config(state="normal")
+        self.btn_scrape.config(state="normal")
         self.btn_rm.config(state="normal" if (g.has_box or g.has_fan) else "disabled")
         self.btn_save.config(state="normal" if g.has_box else "disabled")
         self.sel_lbl.config(text="%s\n%s\ncover: %s   background: %s" % (
@@ -357,6 +379,128 @@ class BoxartGUI(tk.Tk):
     def _do_export(self, d):
         n = self.bx.export_all(d)
         self.after(0, lambda: self._set_status("Exported %d covers -> %s" % (n, d)))
+
+    # -- scraping -----------------------------------------------------------
+    def _region_code(self):
+        want = self.region_var.get()
+        for label, code in REGION_CHOICES:
+            if label == want:
+                return code
+        return "wor"
+
+    def _make_scraper(self):
+        ss = ScreenScraper(ssid=self.ss_user or None, sspassword=self.ss_pass or None,
+                           region=self._region_code())
+        if not ss.has_dev_creds:
+            raise ScrapeError(
+                "No ScreenScraper credentials. This build has no built-in developer "
+                "account; add your own with the Account... button.")
+        return ss
+
+    def ss_account_dialog(self):
+        win = tk.Toplevel(self)
+        win.title("ScreenScraper Account")
+        win.transient(self)
+        win.grab_set()
+        ttk.Label(win, padding=(14, 12, 14, 4), justify="left", wraplength=320,
+                  text="Optional. GammaOS's developer account is built in, so this is "
+                       "only needed for higher scraping quota. Create a free account at "
+                       "screenscraper.fr.").pack(anchor="w")
+        fr = ttk.Frame(win, padding=(14, 0, 14, 12))
+        fr.pack(fill=tk.X)
+        ttk.Label(fr, text="Username:").grid(row=0, column=0, sticky="w", pady=3)
+        uvar = tk.StringVar(value=self.ss_user)
+        ttk.Entry(fr, textvariable=uvar, width=26).grid(row=0, column=1, padx=6)
+        ttk.Label(fr, text="Password:").grid(row=1, column=0, sticky="w", pady=3)
+        pvar = tk.StringVar(value=self.ss_pass)
+        ttk.Entry(fr, textvariable=pvar, width=26, show="*").grid(row=1, column=1, padx=6)
+        bf = ttk.Frame(win, padding=(14, 0, 14, 14))
+        bf.pack(fill=tk.X)
+
+        def save():
+            self.ss_user = uvar.get().strip()
+            self.ss_pass = pvar.get().strip()
+            win.destroy()
+            self._set_status("ScreenScraper account " + ("set" if self.ss_user else "cleared"))
+
+        ttk.Button(bf, text="Save", style="Accent.TButton", command=save).pack(side=tk.RIGHT)
+        ttk.Button(bf, text="Cancel", command=win.destroy).pack(side=tk.RIGHT, padx=6)
+
+    def scrape_selected(self):
+        g = self._selected_game()
+        if not g:
+            return
+        try:
+            ss = self._make_scraper()
+        except ScrapeError as e:
+            messagebox.showerror("ScreenScraper", str(e))
+            return
+        self._run("Scraping %s..." % g.display, lambda: self._do_scrape_one(g, ss))
+
+    def _do_scrape_one(self, g, ss):
+        with tempfile.TemporaryDirectory() as td:
+            r = self.bx.scrape_game(g.rom, ss, td, overwrite=True)
+        if r.get("box") or r.get("fan"):
+            self.bx.adb.restart_nano()
+            self.after(0, self.refresh)
+            msg = "Scraped '%s'" % (r.get("title") or g.display)
+        elif r.get("matched"):
+            msg = "Matched but no usable art for %s" % g.display
+        else:
+            msg = "No ScreenScraper match for %s" % g.display
+        self.after(0, lambda: self._set_status(msg))
+
+    def scrape_library(self):
+        if not self.bx:
+            return
+        try:
+            ss = self._make_scraper()
+        except ScrapeError as e:
+            messagebox.showerror("ScreenScraper", str(e))
+            return
+        win = tk.Toplevel(self)
+        win.title("Scrape Library")
+        win.transient(self)
+        win.grab_set()
+        ttk.Label(win, padding=(16, 14, 16, 6), justify="left", wraplength=360,
+                  text="Scrape covers and backgrounds for your games from ScreenScraper "
+                       "(region: %s). Only games missing art are scraped unless you choose "
+                       "to overwrite." % self.region_var.get()).pack(anchor="w")
+        fr = ttk.Frame(win, padding=(16, 0, 16, 6))
+        fr.pack(fill=tk.X)
+        want_box = tk.BooleanVar(value=True)
+        want_fan = tk.BooleanVar(value=True)
+        overwrite = tk.BooleanVar(value=False)
+        ttk.Checkbutton(fr, text="Covers", variable=want_box).pack(anchor="w")
+        ttk.Checkbutton(fr, text="Backgrounds (fan art)", variable=want_fan).pack(anchor="w")
+        ttk.Checkbutton(fr, text="Overwrite games that already have art",
+                        variable=overwrite).pack(anchor="w")
+        bf = ttk.Frame(win, padding=(16, 4, 16, 14))
+        bf.pack(fill=tk.X)
+
+        def go():
+            wb, wf, ov = want_box.get(), want_fan.get(), overwrite.get()
+            win.destroy()
+            if not (wb or wf):
+                return
+            self._run("Scraping library...", lambda: self._do_scrape_all(ss, wb, wf, ov))
+
+        ttk.Button(bf, text="Start", style="Accent.TButton", command=go).pack(side=tk.RIGHT)
+        ttk.Button(bf, text="Cancel", command=win.destroy).pack(side=tk.RIGHT, padx=6)
+
+    def _do_scrape_all(self, ss, want_box, want_fan, overwrite):
+        def prog(done, total, name, r):
+            self.after(0, lambda: self._set_status(
+                "Scraping %d/%d  %s" % (done, total, name[:40])))
+        with tempfile.TemporaryDirectory() as td:
+            matched, scanned = self.bx.scrape_missing(
+                ss, td, want_box=want_box, want_fan=want_fan,
+                overwrite=overwrite, progress=prog)
+        if matched:
+            self.bx.adb.restart_nano()
+        self.after(0, self.refresh)
+        self.after(0, lambda: self._set_status(
+            "Scraped art for %d of %d games" % (matched, scanned)))
 
     def restart_nano(self):
         if self.bx:

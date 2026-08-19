@@ -40,6 +40,18 @@ jobs:
           python -m pip install --upgrade pip pyinstaller pillow
           python -m pip install .
 
+      - name: Bake in built-in ScreenScraper credentials
+        shell: bash
+        env:
+          SS_DEVCREDS_GEN: ${{ secrets.SS_DEVCREDS_GEN }}
+        run: |
+          if [ -n "$SS_DEVCREDS_GEN" ]; then
+            python -c "import base64,os; open('gammaos_boxart/_devcreds_gen.py','wb').write(base64.b64decode(os.environ['SS_DEVCREDS_GEN']))"
+            echo "baked built-in ScreenScraper credentials into the build"
+          else
+            echo "no SS_DEVCREDS_GEN secret; building without built-in credentials (users supply their own)"
+          fi
+
       - name: Build one-file binary
         run: >
           pyinstaller --onefile --name gammaos-boxart --clean --noconfirm
