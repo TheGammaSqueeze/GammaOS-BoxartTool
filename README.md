@@ -82,9 +82,7 @@ Every change pushes the image and restarts Nano so it shows immediately.
 
 ## Scrape art (ScreenScraper or TheGamesDB)
 
-Instead of hunting for images yourself, the tool can scrape covers and backgrounds from [ScreenScraper](https://screenscraper.fr) or [TheGamesDB](https://thegamesdb.net) on your PC and push them to the device. It matches games the same way GammaOS Nano does on-device (by CRC and filename per system), so you get the same results without loading down the handheld.
-
-![Scraping in the GUI](https://raw.githubusercontent.com/TheGammaSqueeze/GammaOS-BoxartTool/main/docs/scrape_gui.png)
+Instead of hunting for images yourself, the tool can scrape covers and backgrounds from [ScreenScraper](https://screenscraper.fr) or [TheGamesDB](https://thegamesdb.net) on your PC and push them to the device (the scrape controls are on the right of the main window, above). It matches games the same way GammaOS Nano does on-device (by CRC and filename per system), so you get the same results without loading down the handheld.
 
 - **Two sources, your choice.** ScreenScraper has GammaOS's developer account built in, so it works with no setup; TheGamesDB uses your own free API key. Set either under **Credentials...** (CLI: `--source`, `--ss-user`/`--ss-pass`, `--tgdb-key`). A personal ScreenScraper account is optional, for higher quota.
 - **Region defaults to World**, for the widest set of art and international titles (GUI dropdown, or `--region us|eu|jp|wor`).
