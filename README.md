@@ -64,7 +64,7 @@ python3 gammaos-boxart.py --gui        # GUI
 
 ## GUI
 
-Launch `gammaos-boxart-gui`. It connects to the first device, lists your games (games that already have a cover are marked with a star), and shows the current **cover** and **background** on the right. Pick a game and:
+Launch `gammaos-boxart-gui`. It connects to the first device and lists your games with their System, name, on-device **path**, and a star for games that already have a cover, and shows the current **cover** and **background** on the right. Filter by name, system or path; Ctrl or Shift click to select several. Pick a game and:
 
 - **Scrape Selected** scrape the highlighted game(s). Ctrl or Shift click to pick several, or search then select.
 - **Search & Choose...** search the scraper by keyword and pick exactly which result and which art to apply.

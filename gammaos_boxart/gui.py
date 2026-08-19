@@ -102,20 +102,28 @@ class BoxartGUI(tk.Tk):
 
         left = ttk.Frame(main)
         left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        cols = ("box", "system", "game")
-        self.tree = ttk.Treeview(left, columns=cols, show="headings", selectmode="extended")
+        # Tree + vertical scrollbar on top, horizontal scrollbar below (so the full
+        # game path is reachable even though it is wider than its column).
+        tv = ttk.Frame(left)
+        tv.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+        cols = ("box", "system", "game", "path")
+        self.tree = ttk.Treeview(tv, columns=cols, show="headings", selectmode="extended")
         self.tree.heading("box", text="Boxart")
         self.tree.heading("system", text="System")
         self.tree.heading("game", text="Game")
-        self.tree.column("box", width=64, anchor="center", stretch=False)
-        self.tree.column("system", width=130, stretch=False)
-        self.tree.column("game", width=360)
+        self.tree.heading("path", text="Path")
+        self.tree.column("box", width=56, anchor="center", stretch=False)
+        self.tree.column("system", width=110, stretch=False)
+        self.tree.column("game", width=230, stretch=False)
+        self.tree.column("path", width=300)
         self.tree.tag_configure("has", foreground="#1eb877")
         self.tree.tag_configure("no", foreground="#7c7a92")
-        vsb = ttk.Scrollbar(left, orient="vertical", command=self.tree.yview)
-        self.tree.configure(yscrollcommand=vsb.set)
+        vsb = ttk.Scrollbar(tv, orient="vertical", command=self.tree.yview)
+        hsb = ttk.Scrollbar(left, orient="horizontal", command=self.tree.xview)
+        self.tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
         self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         vsb.pack(side=tk.LEFT, fill=tk.Y)
+        hsb.pack(side=tk.TOP, fill=tk.X)
         self.tree.bind("<<TreeviewSelect>>", self.on_select)
 
         # right: preview + actions
@@ -237,10 +245,11 @@ class BoxartGUI(tk.Tk):
         for i, g in enumerate(self.games):
             if only and not g.has_box:
                 continue
-            if q and q not in g.display.lower() and q not in g.system.lower():
+            if q and q not in g.display.lower() and q not in g.system.lower() \
+                    and q not in g.rom.lower():
                 continue
             mark = "★" if g.has_box else "·"
-            self.tree.insert("", "end", iid=str(i), values=(mark, g.system, g.display),
+            self.tree.insert("", "end", iid=str(i), values=(mark, g.system, g.display, g.rom),
                              tags=("has" if g.has_box else "no",))
 
     def _selected_game(self):
@@ -325,7 +334,7 @@ class BoxartGUI(tk.Tk):
         with tempfile.TemporaryDirectory() as td:
             self.bx.set_art(g.rom, img, td, kind=kind)
         self.bx.adb.restart_nano()
-        self.after(0, self.refresh)
+        self._load_games()
         self.after(0, lambda: self._set_status("Set %s for %s" % (
             "background" if kind == "fan" else "cover", g.display)))
 
@@ -357,7 +366,7 @@ class BoxartGUI(tk.Tk):
         with tempfile.TemporaryDirectory() as td:
             self.bx.remove_art(g.rom, td, kind=kind)
         self.bx.adb.restart_nano()
-        self.after(0, self.refresh)
+        self._load_games()
 
     def save_cover_as(self):
         g = self._selected_game()
@@ -384,7 +393,7 @@ class BoxartGUI(tk.Tk):
             applied, _ = self.bx.import_dir(d, td, mode="auto")
         if applied:
             self.bx.adb.restart_nano()
-        self.after(0, self.refresh)
+            self._load_games()
         self.after(0, lambda: self._set_status("Imported %d covers" % applied))
 
     def bulk_export(self):
@@ -597,8 +606,8 @@ class BoxartGUI(tk.Tk):
                     self.bx.adb.restart_nano()
                 except Exception:  # noqa: BLE001
                     pass
+                self._load_games()
             self.after(0, lambda: finish(matched, scanned, err))
-            self.after(0, self.refresh)
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -631,7 +640,8 @@ class BoxartGUI(tk.Tk):
         win = tk.Toplevel(self)
         win.title("Search and Choose - %s" % g.display)
         win.transient(self)
-        win.geometry("620x480")
+        win.geometry("800x600")
+        win.minsize(760, 560)
         win.grab_set()
 
         top = ttk.Frame(win, padding=(12, 12, 12, 6))
@@ -643,22 +653,69 @@ class BoxartGUI(tk.Tk):
 
         mid = ttk.Frame(win, padding=(12, 0))
         mid.pack(fill=tk.BOTH, expand=True)
-        res = ttk.Treeview(mid, columns=("t", "s"), show="headings", height=9, selectmode="browse")
+        lf = ttk.Frame(mid)
+        lf.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        res = ttk.Treeview(lf, columns=("t", "s"), show="headings", height=12, selectmode="browse")
         res.heading("t", text="Result")
         res.heading("s", text="System")
-        res.column("t", width=300)
-        res.column("s", width=100)
+        res.column("t", width=280)
+        res.column("s", width=90)
+        rsb = ttk.Scrollbar(lf, orient="vertical", command=res.yview)
+        res.configure(yscrollcommand=rsb.set)
         res.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        pv = tk.Label(mid, width=26, bg="#ffffff", relief="solid", bd=1, text="pick a result",
-                      fg="#7c7a92")
-        pv.pack(side=tk.LEFT, fill=tk.Y, padx=(10, 0))
+        rsb.pack(side=tk.LEFT, fill=tk.Y)
+
+        # Fixed-pixel preview boxes (Frame + pack_propagate off) so the cover and the
+        # background always render at a known size and are never clipped, on any platform.
+        pvcol = ttk.Frame(mid, width=248)
+        pvcol.pack(side=tk.LEFT, fill=tk.Y, padx=(12, 0))
+        pvcol.pack_propagate(False)
+        ttk.Label(pvcol, text="Cover", style="Head.TLabel").pack(anchor="w")
+        cbox = tk.Frame(pvcol, width=236, height=296, bg="#ffffff", relief="solid", bd=1)
+        cbox.pack(pady=(4, 8))
+        cbox.pack_propagate(False)
+        pv_box = tk.Label(cbox, bg="#ffffff", text="pick a result", fg="#7c7a92")
+        pv_box.pack(fill=tk.BOTH, expand=True)
+        ttk.Label(pvcol, text="Background (fan art)", style="Head.TLabel").pack(anchor="w")
+        fbox = tk.Frame(pvcol, width=236, height=150, bg="#ffffff", relief="solid", bd=1)
+        fbox.pack(pady=(4, 8))
+        fbox.pack_propagate(False)
+        pv_fan = tk.Label(fbox, bg="#ffffff", text="none", fg="#7c7a92")
+        pv_fan.pack(fill=tk.BOTH, expand=True)
 
         st = ttk.Label(win, text="", style="Dim.TLabel", padding=(12, 4))
         st.pack(fill=tk.X)
         bf = ttk.Frame(win, padding=(12, 0, 12, 12))
         bf.pack(fill=tk.X)
 
-        state = {"cands": [], "result": None, "img": None}
+        state = {"cands": [], "result": None, "imgs": {}}
+
+        def render_art(data, label, key, maxsz, empty):
+            if not data:
+                state["imgs"].pop(key, None)
+                label.config(image="", text=empty)
+                return
+            local = os.path.join(self._tmp, "search_%s.img" % key)
+            with open(local, "wb") as f:
+                f.write(data)
+            img = None
+            if _HAVE_PIL:
+                try:
+                    im = Image.open(local)
+                    im.thumbnail(maxsz)
+                    img = ImageTk.PhotoImage(im)
+                except Exception:
+                    img = None
+            if img is None:
+                try:
+                    img = tk.PhotoImage(file=local)
+                except Exception:
+                    img = None
+            if img is not None:
+                state["imgs"][key] = img
+                label.config(image=img, text="")
+            else:
+                label.config(image="", text="(found; install Pillow to preview)")
 
         def do_search():
             res.delete(*res.get_children())
@@ -678,6 +735,9 @@ class BoxartGUI(tk.Tk):
                     for i, c in enumerate(cands):
                         res.insert("", "end", iid=str(i), values=(c.title, c.system))
                     st.config(text=err or ("%d result(s)" % len(cands)))
+                    if os.environ.get("GBT_SEARCH") and cands:
+                        res.selection_set("0")
+                        on_pick()
                 self.after(0, show)
             threading.Thread(target=work, daemon=True).start()
 
@@ -687,7 +747,8 @@ class BoxartGUI(tk.Tk):
                 return
             cand = state["cands"][int(sel[0])]
             st.config(text="loading art...")
-            pv.config(image="", text="loading...")
+            pv_box.config(image="", text="loading...")
+            pv_fan.config(image="", text="loading...")
             state["result"] = None
 
             def work():
@@ -698,30 +759,8 @@ class BoxartGUI(tk.Tk):
 
                 def show():
                     state["result"] = r
-                    if r and r.box:
-                        local = os.path.join(self._tmp, "search_prev.img")
-                        with open(local, "wb") as f:
-                            f.write(r.box)
-                        img = None
-                        if _HAVE_PIL:
-                            try:
-                                im = Image.open(local)
-                                im.thumbnail((180, 240))
-                                img = ImageTk.PhotoImage(im)
-                            except Exception:
-                                img = None
-                        if img is None:
-                            try:
-                                img = tk.PhotoImage(file=local)
-                            except Exception:
-                                img = None
-                        if img is not None:
-                            state["img"] = img
-                            pv.config(image=img, text="")
-                        else:
-                            pv.config(image="", text="(cover found)")
-                    else:
-                        pv.config(image="", text="no cover")
+                    render_art(r.box if r else None, pv_box, "box", (224, 288), "no cover")
+                    render_art(r.fan if r else None, pv_fan, "fan", (224, 142), "no background")
                     have = [k for k in ("box", "fan") if r and getattr(r, k)]
                     st.config(text=("art: " + ", ".join(have)) if have else "no usable art")
                 self.after(0, show)
@@ -733,11 +772,22 @@ class BoxartGUI(tk.Tk):
         def apply(kinds):
             r = state["result"]
             if not r:
+                self._set_status("Pick a result first")
                 return
-            applied = self._apply_from_result(g.rom, r, kinds)
+            if not any(getattr(r, k, None) for k in kinds):
+                messagebox.showinfo("Apply", "This result has no matching art to apply.")
+                return
             win.destroy()
-            if applied:
-                self._run("Applying + restarting Nano...", self._apply_finish)
+
+            def work():
+                applied = self._apply_from_result(g.rom, r, kinds)
+                if applied:
+                    self.bx.adb.restart_nano()
+                    self._load_games()
+                self.after(0, lambda: self._set_status(
+                    ("Applied " + ", ".join("background" if k == "fan" else "cover" for k in applied))
+                    if applied else "No art to apply"))
+            self._run("Applying art + restarting Nano...", work)
 
         ttk.Button(bf, text="Apply Cover", command=lambda: apply(["box"])).pack(side=tk.LEFT)
         ttk.Button(bf, text="Apply Background", command=lambda: apply(["fan"])).pack(side=tk.LEFT, padx=6)
@@ -748,14 +798,14 @@ class BoxartGUI(tk.Tk):
         ent.bind("<Return>", lambda _e: do_search())
         do_search()
 
-    def _apply_finish(self):
-        self.bx.adb.restart_nano()
-        self.after(0, self.refresh)
-        self.after(0, lambda: self._set_status("Applied chosen art"))
-
     def restart_nano(self):
-        if self.bx:
-            self._run("Restarting Nano...", self.bx.adb.restart_nano)
+        if not self.bx:
+            return
+
+        def work():
+            self.bx.adb.restart_nano()
+            self.after(0, lambda: self._set_status("Nano restarted"))
+        self._run("Restarting Nano...", work)
 
     # -- worker plumbing ----------------------------------------------------
     def _run(self, status, fn, busy_ui=True):
