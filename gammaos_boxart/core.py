@@ -581,11 +581,13 @@ class Boxart:
         return self._apply_result(rom, tmpdir, result, getattr(scraper, "name", "screenscraper"))
 
     def scrape_roms(self, scraper, tmpdir, roms, want_box=True, want_fan=True,
-                    overwrite=False, use_crc=True, progress=None):
+                    overwrite=False, use_crc=True, progress=None, cancel=None):
         """Scrape a specific list of ROM paths (e.g. the games highlighted in the UI)."""
         matched = 0
         roms = list(roms)
         for i, rom in enumerate(roms):
+            if cancel and cancel():
+                return matched, i
             try:
                 r = self.scrape_game(rom, scraper, tmpdir, want_box=want_box,
                                      want_fan=want_fan, overwrite=overwrite, use_crc=use_crc)
@@ -598,7 +600,7 @@ class Boxart:
         return matched, len(roms)
 
     def scrape_missing(self, scraper, tmpdir, systems=None, want_box=True,
-                       want_fan=True, overwrite=False, use_crc=True, progress=None):
+                       want_fan=True, overwrite=False, use_crc=True, progress=None, cancel=None):
         """
         Scrape every game (optionally limited to a set of system names/romDirs).
         By default only games missing the requested art are scraped; overwrite
@@ -611,6 +613,8 @@ class Boxart:
                      if g.system.lower() in want or _system_of(g.rom).lower() in want]
         matched = 0
         for i, g in enumerate(games):
+            if cancel and cancel():
+                return matched, i
             try:
                 r = self.scrape_game(g.rom, scraper, tmpdir, want_box=want_box,
                                      want_fan=want_fan, overwrite=overwrite,

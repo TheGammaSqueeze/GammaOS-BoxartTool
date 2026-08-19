@@ -223,8 +223,12 @@ class BoxartGUI(tk.Tk):
                     self.tree.see(iid)
                     self.on_select()
                     break
-            if os.environ.get("GBT_SEARCH"):
+            if os.environ.get("GBT_SEARCH") and not getattr(self, "_hooked", False):
+                self._hooked = True
                 self.after(600, self.search_choose)
+            if os.environ.get("GBT_SCRAPE") and not getattr(self, "_hooked", False):
+                self._hooked = True
+                self.after(600, self.scrape_selected)
 
     def _apply_filter(self):
         q = self.filter_var.get().strip().lower()
@@ -462,19 +466,12 @@ class BoxartGUI(tk.Tk):
             return
         roms = [g.rom for g in games]
         overwrite = len(games) == 1   # a single explicit pick re-scrapes; a bulk pick fills gaps
-        self._run("Scraping %d game(s)..." % len(roms),
-                  lambda: self._do_scrape_roms(sc, roms, overwrite))
+        title = "Scraping %d game%s" % (len(roms), "" if len(roms) == 1 else "s")
 
-    def _do_scrape_roms(self, sc, roms, overwrite):
-        def prog(done, total, name, r):
-            self.after(0, lambda: self._set_status("Scraping %d/%d  %s" % (done, total, name[:40])))
-        with tempfile.TemporaryDirectory() as td:
-            matched, scanned = self.bx.scrape_roms(
-                sc, td, roms, overwrite=overwrite, progress=prog)
-        if matched:
-            self.bx.adb.restart_nano()
-        self.after(0, self.refresh)
-        self.after(0, lambda: self._set_status("Scraped art for %d of %d game(s)" % (matched, scanned)))
+        def run(td, progress, cancel):
+            return self.bx.scrape_roms(sc, td, roms, overwrite=overwrite,
+                                       progress=progress, cancel=cancel)
+        self._scrape_with_progress(title, "%s, region %s" % (sc.label, self.region_var.get()), run)
 
     # -- scrape the whole library -------------------------------------------
     def scrape_library(self):
@@ -510,21 +507,100 @@ class BoxartGUI(tk.Tk):
             win.destroy()
             if not (wb or wf):
                 return
-            self._run("Scraping library...", lambda: self._do_scrape_all(sc, wb, wf, ov))
+
+            def run(td, progress, cancel):
+                return self.bx.scrape_missing(sc, td, want_box=wb, want_fan=wf,
+                                              overwrite=ov, progress=progress, cancel=cancel)
+            self._scrape_with_progress("Scraping library",
+                                       "%s, region %s" % (sc.label, self.region_var.get()), run)
 
         ttk.Button(bf, text="Start", style="Accent.TButton", command=go).pack(side=tk.RIGHT)
         ttk.Button(bf, text="Cancel", command=win.destroy).pack(side=tk.RIGHT, padx=6)
 
-    def _do_scrape_all(self, sc, want_box, want_fan, overwrite):
+    # -- shared modal progress + result dialog ------------------------------
+    def _scrape_with_progress(self, title, subtitle, run):
+        """run(tmpdir, progress, cancel) -> (matched, scanned), shown in a modal dialog."""
+        dlg = tk.Toplevel(self)
+        dlg.title(title)
+        dlg.transient(self)
+        dlg.grab_set()
+        dlg.resizable(False, False)
+        ttk.Label(dlg, text=title, style="Head.TLabel", padding=(18, 16, 18, 2)).pack(anchor="w")
+        ttk.Label(dlg, text=subtitle, style="Dim.TLabel", padding=(18, 0)).pack(anchor="w")
+        pb = ttk.Progressbar(dlg, mode="determinate", length=380, maximum=1)
+        pb.pack(padx=18, pady=(10, 4))
+        cur = ttk.Label(dlg, text="Starting...", padding=(18, 0), wraplength=380, justify="left")
+        cur.pack(anchor="w")
+        tally = ttk.Label(dlg, text="", style="Dim.TLabel", padding=(18, 8),
+                          wraplength=380, justify="left")
+        tally.pack(anchor="w")
+        bf = ttk.Frame(dlg, padding=(18, 2, 18, 14))
+        bf.pack(fill=tk.X)
+        cancel_ev = threading.Event()
+        btn = ttk.Button(bf, text="Cancel", command=cancel_ev.set)
+        btn.pack(side=tk.RIGHT)
+        dlg.protocol("WM_DELETE_WINDOW", cancel_ev.set)
+
+        m = {"box": 0, "fan": 0, "skip": 0, "miss": 0, "err": 0}
+
+        def tally_text():
+            return ("Covers %d    Backgrounds %d\nSkipped %d    No match %d    Errors %d"
+                    % (m["box"], m["fan"], m["skip"], m["miss"], m["err"]))
+
         def prog(done, total, name, r):
-            self.after(0, lambda: self._set_status("Scraping %d/%d  %s" % (done, total, name[:40])))
-        with tempfile.TemporaryDirectory() as td:
-            matched, scanned = self.bx.scrape_missing(
-                sc, td, want_box=want_box, want_fan=want_fan, overwrite=overwrite, progress=prog)
-        if matched:
-            self.bx.adb.restart_nano()
-        self.after(0, self.refresh)
-        self.after(0, lambda: self._set_status("Scraped art for %d of %d games" % (matched, scanned)))
+            if r.get("box"):
+                m["box"] += 1
+            if r.get("fan"):
+                m["fan"] += 1
+            if r.get("skipped"):
+                m["skip"] += 1
+            elif "matched" not in r:
+                m["err"] += 1
+            elif not r.get("matched"):
+                m["miss"] += 1
+
+            def ui():
+                pb.config(maximum=max(total, 1), value=done)
+                cur.config(text="(%d/%d)  %s" % (done, total, name[:44]))
+                tally.config(text=tally_text())
+            self.after(0, ui)
+
+        def finish(matched, scanned, err):
+            if err:
+                head = "Scraping failed"
+            elif cancel_ev.is_set():
+                head = "Cancelled"
+            elif matched and (m["miss"] or m["err"]):
+                head = "Finished with mixed results"
+            elif matched:
+                head = "Scraping complete"
+            else:
+                head = "No art found"
+            pb.config(value=pb["maximum"])
+            cur.config(text=head)
+            tally.config(text=err or ("Applied art to %d of %d game%s.\n%s"
+                                      % (matched, scanned, "" if scanned == 1 else "s", tally_text())))
+            btn.config(text="Close", command=dlg.destroy)
+            dlg.protocol("WM_DELETE_WINDOW", dlg.destroy)
+            self._set_status("Scraped art for %d of %d game(s)" % (matched, scanned))
+
+        def worker():
+            err = None
+            matched = scanned = 0
+            try:
+                with tempfile.TemporaryDirectory() as td:
+                    matched, scanned = run(td, prog, cancel_ev.is_set)
+            except Exception as e:  # noqa: BLE001
+                err = str(e)
+            if matched:
+                try:
+                    self.bx.adb.restart_nano()
+                except Exception:  # noqa: BLE001
+                    pass
+            self.after(0, lambda: finish(matched, scanned, err))
+            self.after(0, self.refresh)
+
+        threading.Thread(target=worker, daemon=True).start()
 
     # -- search the scraper and choose the result / art ---------------------
     def _apply_from_result(self, rom, result, kinds):

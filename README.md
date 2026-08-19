@@ -88,6 +88,9 @@ Instead of hunting for images yourself, the tool can scrape covers and backgroun
 - **Region defaults to World**, for the widest set of art and international titles (GUI dropdown, or `--region us|eu|jp|wor`).
 - **Scrape one, many, or all.** Scrape the games you highlight (Ctrl/Shift click, or search then select) with **Scrape Selected**, or the whole library with **Scrape Library...**. Only missing art is scraped unless you overwrite.
 - **Search and choose.** For a game that does not auto-match, open **Search & Choose...**, type keywords, and pick exactly which result and which art to apply.
+- **Watch the progress.** Scraping shows a live progress dialog (current game and a running tally) and finishes with a clear summary, so you always know whether it succeeded, was mixed, or failed.
+
+![The scrape progress and result summary](https://raw.githubusercontent.com/TheGammaSqueeze/GammaOS-BoxartTool/main/docs/scrape_progress.png)
 
 ![Searching the scraper and choosing a result](https://raw.githubusercontent.com/TheGammaSqueeze/GammaOS-BoxartTool/main/docs/scrape_search.png)
 
