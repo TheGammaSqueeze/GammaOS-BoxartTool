@@ -6,7 +6,7 @@ import sys
 import tempfile
 
 from .core import Adb, AdbError, Boxart, cache_key, NANO_DIR, ART
-from .scraper import ScreenScraper, ScrapeError
+from .scraper import make_scraper, ScrapeError
 
 
 def _adb(args):
@@ -107,15 +107,16 @@ def cmd_import(args):
 
 
 def _scraper(args):
-    ss = ScreenScraper(
-        ssid=getattr(args, "ss_user", None),
-        sspassword=getattr(args, "ss_pass", None),
+    sc = make_scraper(
+        source=getattr(args, "source", "screenscraper"),
         region=getattr(args, "region", "wor"),
+        ss_user=getattr(args, "ss_user", None),
+        ss_pass=getattr(args, "ss_pass", None),
+        tgdb_key=getattr(args, "tgdb_key", None),
     )
-    if not ss.has_dev_creds:
-        _die("no ScreenScraper credentials. This build has no built-in developer "
-             "account; pass your own with --ss-user and --ss-pass.")
-    return ss
+    if not sc.ready:
+        _die(sc.unready_reason())
+    return sc
 
 
 def _art_flags(args):
@@ -252,10 +253,13 @@ def build_parser():
     p.set_defaults(func=cmd_import)
 
     def _add_scrape_opts(p):
+        p.add_argument("--source", choices=["screenscraper", "thegamesdb"],
+                       default="screenscraper", help="scraper source (default screenscraper)")
         p.add_argument("--region", default="wor",
                        help="preferred region (default world): wor/world, us, eu, jp")
         p.add_argument("--ss-user", help="your ScreenScraper username (optional, for quota)")
         p.add_argument("--ss-pass", help="your ScreenScraper password (optional, for quota)")
+        p.add_argument("--tgdb-key", help="your TheGamesDB API key (required for --source thegamesdb)")
         p.add_argument("--covers-only", action="store_true", help="only fetch covers")
         p.add_argument("--bg-only", action="store_true", help="only fetch backgrounds (fan art)")
         p.add_argument("--overwrite", action="store_true", help="re-scrape games that already have art")

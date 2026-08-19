@@ -549,12 +549,15 @@ class Boxart:
 
         crc = None
         size = self.adb.file_size(rom)
-        if use_crc and 0 < size <= 128 * 1024 * 1024:
+        if use_crc and getattr(scraper, "uses_crc", True) and 0 < size <= 128 * 1024 * 1024:
             from .scraper import crc32_hex
             crc = crc32_hex(self.adb.read_rom_head(rom))
 
         result = scraper.scrape(title_override or romnom, romdir, crc=crc, size=size or None,
                                 want_box=want_box, want_fan=want_fan)
+        return self._apply_result(rom, tmpdir, result, getattr(scraper, "name", "screenscraper"))
+
+    def _apply_result(self, rom, tmpdir, result, source):
         out = {"matched": result.matched, "skipped": False, "box": False,
                "fan": False, "title": result.title, "error": result.error}
         if not result.matched:
@@ -566,9 +569,33 @@ class Boxart:
             with open(local, "wb") as f:
                 f.write(data)
             self.set_art(rom, local, tmpdir, kind=kind,
-                         title=result.title or None, scraper="screenscraper")
+                         title=result.title or None, scraper=source)
             out[kind] = True
         return out
+
+    def apply_candidate(self, rom, scraper, candidate, tmpdir,
+                        want_box=True, want_fan=True):
+        """Download and apply the art for a search result the user chose."""
+        rom = self.canonical_rom(rom)
+        result = scraper.fetch_media(candidate, want_box=want_box, want_fan=want_fan)
+        return self._apply_result(rom, tmpdir, result, getattr(scraper, "name", "screenscraper"))
+
+    def scrape_roms(self, scraper, tmpdir, roms, want_box=True, want_fan=True,
+                    overwrite=False, use_crc=True, progress=None):
+        """Scrape a specific list of ROM paths (e.g. the games highlighted in the UI)."""
+        matched = 0
+        roms = list(roms)
+        for i, rom in enumerate(roms):
+            try:
+                r = self.scrape_game(rom, scraper, tmpdir, want_box=want_box,
+                                     want_fan=want_fan, overwrite=overwrite, use_crc=use_crc)
+                if r.get("box") or r.get("fan"):
+                    matched += 1
+            except Exception as e:
+                r = {"error": str(e)}
+            if progress:
+                progress(i + 1, len(roms), posixpath.basename(rom), r)
+        return matched, len(roms)
 
     def scrape_missing(self, scraper, tmpdir, systems=None, want_box=True,
                        want_fan=True, overwrite=False, use_crc=True, progress=None):

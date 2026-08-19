@@ -9,7 +9,7 @@ GammaOS Nano has a built-in scraper and a per-game "Set Boxart" option, but ther
 ## What it does
 
 - **View** every game and whether it already has a cover and a background.
-- **Scrape** covers and backgrounds automatically from [ScreenScraper.fr](https://screenscraper.fr), from your PC, for one game or the whole library. GammaOS's developer account is built in, so it works out of the box; the region defaults to World.
+- **Scrape** covers and backgrounds from [ScreenScraper](https://screenscraper.fr) or [TheGamesDB](https://thegamesdb.net), from your PC, for one game, the games you highlight, or the whole library. Pick the source and region, or search by keyword and choose the exact result and art. GammaOS's ScreenScraper account is built in, so it works out of the box.
 - **Add / replace** a game's **cover** (the thumbnail) or its **background** (the fan-art image Nano shows behind the game) from any local image (PNG, JPG, WebP, ...).
 - **Remove** a custom cover or background (falls back to the generic cartridge icon).
 - **Bulk export** every cover and background to a folder, with a manifest, so you can back them up.
@@ -66,7 +66,8 @@ python3 gammaos-boxart.py --gui        # GUI
 
 Launch `gammaos-boxart-gui`. It connects to the first device, lists your games (games that already have a cover are marked with a star), and shows the current **cover** and **background** on the right. Pick a game and:
 
-- **Scrape This Game** fetch a cover + background from ScreenScraper for the selected game.
+- **Scrape Selected** scrape the highlighted game(s). Ctrl or Shift click to pick several, or search then select.
+- **Search & Choose...** search the scraper by keyword and pick exactly which result and which art to apply.
 - **Scrape Library...** scrape the whole library (only games missing art, unless you tick overwrite).
 - **Set / Replace Cover...** choose any image for the boxart thumbnail.
 - **Set / Replace Background...** choose the full-screen fan-art image Nano shows behind the game.
@@ -75,19 +76,22 @@ Launch `gammaos-boxart-gui`. It connects to the first device, lists your games (
 - **Bulk Import... / Bulk Export...** manage the whole library at once.
 - **Restart Nano** reload after external changes.
 
-Pick the scrape **Region** (default World) and, optionally, add your own free ScreenScraper account under **Account...** for higher quota.
+Pick the **Source** (ScreenScraper or TheGamesDB) and **Region** (default World). Under **Credentials...**, a personal ScreenScraper account is optional (higher quota) and TheGamesDB needs your own free API key.
 
 Every change pushes the image and restarts Nano so it shows immediately.
 
-## Scrape from ScreenScraper
+## Scrape art (ScreenScraper or TheGamesDB)
 
-Instead of hunting for images yourself, the tool can scrape covers and backgrounds directly from [ScreenScraper.fr](https://screenscraper.fr) on your PC and push them to the device. It matches games the same way GammaOS Nano does on-device (by CRC and filename per system), so you get the same results without loading down the handheld.
+Instead of hunting for images yourself, the tool can scrape covers and backgrounds from [ScreenScraper](https://screenscraper.fr) or [TheGamesDB](https://thegamesdb.net) on your PC and push them to the device. It matches games the same way GammaOS Nano does on-device (by CRC and filename per system), so you get the same results without loading down the handheld.
 
 ![Scraping in the GUI](https://raw.githubusercontent.com/TheGammaSqueeze/GammaOS-BoxartTool/main/docs/scrape_gui.png)
 
-- **Built in and ready.** GammaOS's ScreenScraper developer account is bundled, so scraping works with no setup. You can add your own free ScreenScraper account (GUI: **Account...**, CLI: `--ss-user`/`--ss-pass`) for higher quota.
-- **Region defaults to World**, so you get the widest set of art and international titles. Change it in the GUI dropdown or with `--region us|eu|jp|wor`.
-- **Only missing art is scraped** by default; tick overwrite (GUI) or pass `--overwrite` (CLI) to re-scrape.
+- **Two sources, your choice.** ScreenScraper has GammaOS's developer account built in, so it works with no setup; TheGamesDB uses your own free API key. Set either under **Credentials...** (CLI: `--source`, `--ss-user`/`--ss-pass`, `--tgdb-key`). A personal ScreenScraper account is optional, for higher quota.
+- **Region defaults to World**, for the widest set of art and international titles (GUI dropdown, or `--region us|eu|jp|wor`).
+- **Scrape one, many, or all.** Scrape the games you highlight (Ctrl/Shift click, or search then select) with **Scrape Selected**, or the whole library with **Scrape Library...**. Only missing art is scraped unless you overwrite.
+- **Search and choose.** For a game that does not auto-match, open **Search & Choose...**, type keywords, and pick exactly which result and which art to apply.
+
+![Searching the scraper and choosing a result](https://raw.githubusercontent.com/TheGammaSqueeze/GammaOS-BoxartTool/main/docs/scrape_search.png)
 
 ![Scraping from the command line](https://raw.githubusercontent.com/TheGammaSqueeze/GammaOS-BoxartTool/main/docs/scrape_cli.png)
 
@@ -107,10 +111,12 @@ gammaos-boxart remove nes/Spacegulls.nes              # remove the cover
 gammaos-boxart remove nes/Spacegulls.nes --both       # remove cover and background
 gammaos-boxart export ./my-covers                     # back up all art (+ manifest)
 gammaos-boxart import ./my-covers                     # bulk import (filename or manifest match)
-gammaos-boxart scrape nes/Spacegulls.nes              # scrape one game from ScreenScraper
+gammaos-boxart scrape nes/Spacegulls.nes              # scrape one game (ScreenScraper)
+gammaos-boxart scrape nes/Spacegulls.nes --title "Space Gulls"   # override the search term
 gammaos-boxart scrape-all                             # scrape the whole library (missing art)
 gammaos-boxart scrape-all nes --overwrite             # re-scrape one system
 gammaos-boxart scrape-all --region us --covers-only   # region + only covers
+gammaos-boxart scrape-all --source thegamesdb --tgdb-key KEY     # use TheGamesDB
 gammaos-boxart scrape-all --ss-user NAME --ss-pass PW # use your own ScreenScraper account
 gammaos-boxart info nes/Spacegulls.nes                # cache location + a rom's cache key
 ```
