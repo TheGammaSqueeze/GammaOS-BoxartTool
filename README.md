@@ -8,15 +8,18 @@ GammaOS Nano has a built-in scraper and a per-game "Set Boxart" option, but ther
 
 ## What it does
 
-- **View** every game and whether it already has a cover and a background.
-- **Scrape** covers and backgrounds from [ScreenScraper](https://screenscraper.fr) or [TheGamesDB](https://thegamesdb.net), from your PC, for one game, the games you highlight, or the whole library. Pick the source and region, or search by keyword and choose the exact result and art. GammaOS's ScreenScraper account is built in, so it works out of the box.
+- **View** every game, its on-device **path**, and whether it already has a cover and a background.
+- **Scrape** covers, backgrounds **and full metadata** from [ScreenScraper](https://screenscraper.fr) or [TheGamesDB](https://thegamesdb.net), from your PC, for one game, the games you highlight, or the whole library. Pick the source and region, or search by keyword and choose the exact result and art. GammaOS's ScreenScraper account is built in, so it works out of the box.
 - **Add / replace** a game's **cover** (the thumbnail) or its **background** (the fan-art image Nano shows behind the game) from any local image (PNG, JPG, WebP, ...).
+- **Edit the title** of any game (even after scraping); it shows everywhere Nano displays the name.
 - **Remove** a custom cover or background (falls back to the generic cartridge icon).
 - **Bulk export** every cover and background to a folder, with a manifest, so you can back them up.
 - **Bulk import** a folder of images, matched to your games by filename or by a manifest.
 - Works with the exact paths, hashing and JSON that Nano expects, so it is safe and reversible.
 
 "Cover" is the boxart thumbnail. "Background" is the fan-art image Nano displays full-screen behind the game (its Hover Background Art / preview). You can set either or both.
+
+Scraping fills the same metadata Nano's on-device scraper does, so the in-game Information page is complete: description, genre, players, rating, release date, developer and publisher, not just the images.
 
 ## Download
 
@@ -72,13 +75,14 @@ Launch `gammaos-boxart-gui`. It connects to the first device and lists your game
 - **Set / Replace Cover...** choose any image for the boxart thumbnail.
 - **Set / Replace Background...** choose the full-screen fan-art image Nano shows behind the game.
 - **Save Cover As...** pull the existing cover to your PC.
+- **Edit Title...** rename a game; the new title shows everywhere Nano displays the name.
 - **Remove...** delete the cover, the background, or both.
 - **Bulk Import... / Bulk Export...** manage the whole library at once.
-- **Restart Nano** reload after external changes.
+- **Restart Nano** force a full reload after external changes.
 
 Pick the **Source** (ScreenScraper or TheGamesDB) and **Region** (default World). Under **Credentials...**, a personal ScreenScraper account is optional (higher quota) and TheGamesDB needs your own free API key.
 
-Every change pushes the image and restarts Nano so it shows immediately.
+Every change pushes the image and refreshes Nano so it shows immediately. On builds that support it, Nano reloads your changes in place with no restart; on older builds the tool restarts Nano automatically instead.
 
 ## Scrape art (ScreenScraper or TheGamesDB)
 
@@ -108,6 +112,8 @@ gammaos-boxart set nes/Spacegulls.nes cover.png       # add or replace the cover
 gammaos-boxart set nes/Spacegulls.nes bg.jpg --fan    # add or replace the background (fan art)
 gammaos-boxart get nes/Spacegulls.nes -o out.png      # pull the cover to your PC
 gammaos-boxart get nes/Spacegulls.nes --fan -o bg.png # pull the background
+gammaos-boxart title nes/Spacegulls.nes "Space Gulls" # set the displayed title
+gammaos-boxart title nes/Spacegulls.nes               # clear a custom title
 gammaos-boxart remove nes/Spacegulls.nes              # remove the cover
 gammaos-boxart remove nes/Spacegulls.nes --both       # remove cover and background
 gammaos-boxart export ./my-covers                     # back up all art (+ manifest)
@@ -162,7 +168,7 @@ Nano keeps cover art in a private cache:
 
 - The `rom` key is matched by Nano with storage-alias normalization across `/storage/emulated/0`, `/data/media/0`, `/sdcard` and `/storage/self/primary`, so a cover set under any of those resolves for the same game. The tool keys covers under the same view Nano's scanner uses (`/data/media/0` when present) so its files interoperate with Nano's own "Set Boxart" and "Reset Boxart".
 - `scraper` is set to `manual` for a user-supplied cover.
-- Nano loads `index.json` once at startup, so the tool restarts Nano after changes. Your covers are written to a temp path and copied into place with the correct owner and SELinux label so Nano can read them, and the tool never overwrites an `index.json` it cannot parse, so existing covers are never lost.
+- Older Nano builds load `index.json` once at startup, so the tool restarts Nano after changes. Newer builds reload the manifest in place when the tool bumps `sys.gammaos.nano.scrape_reload`, so your changes appear with no restart; the tool probes for this once per session and falls back to a restart automatically. Your covers are written to a temp path and copied into place with the correct owner and SELinux label so Nano can read them, and the tool never overwrites an `index.json` it cannot parse, so existing covers are never lost.
 
 ## Safety
 

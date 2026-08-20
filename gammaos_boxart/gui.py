@@ -163,6 +163,9 @@ class BoxartGUI(tk.Tk):
         self.btn_rm = ttk.Button(rowf, text="Remove...", command=self.remove_art_dialog,
                                  state="disabled")
         self.btn_rm.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(3, 0))
+        self.btn_title = ttk.Button(right, text="Edit Title...", command=self.edit_title,
+                                    state="disabled")
+        self.btn_title.pack(fill=tk.X, pady=(4, 0))
 
         ttk.Separator(right, orient="horizontal").pack(fill=tk.X, pady=(12, 8))
         ttk.Label(right, text="Scrape art", style="Head.TLabel").pack(anchor="w")
@@ -268,6 +271,7 @@ class BoxartGUI(tk.Tk):
         self.btn_search.config(state="normal")
         self.btn_rm.config(state="normal" if (g.has_box or g.has_fan) else "disabled")
         self.btn_save.config(state="normal" if g.has_box else "disabled")
+        self.btn_title.config(state="normal")
         self.sel_lbl.config(text="%s\n%s\ncover: %s   background: %s" % (
             g.display, g.system, "yes" if g.has_box else "no",
             "yes" if g.has_fan else "no"))
@@ -313,6 +317,28 @@ class BoxartGUI(tk.Tk):
         target.config(image=img, text="")
 
     # -- actions ------------------------------------------------------------
+    def edit_title(self):
+        g = self._selected_game()
+        if not g:
+            return
+        from tkinter import simpledialog
+        current = g.display or ""
+        name = simpledialog.askstring(
+            "Edit Title",
+            "Displayed title for this game\n(leave blank to clear a custom title):",
+            initialvalue=current, parent=self)
+        if name is None:
+            return
+        name = name.strip()
+
+        def work():
+            self.bx.set_name(g.rom, name, self._tmp)
+            self.bx.adb.refresh_nano()
+            self.after(0, self._load_games)
+            self.after(0, lambda: self._set_status(
+                "Title updated" if name else "Custom title cleared"))
+        self._run("Updating title...", work)
+
     def set_cover(self):
         self._pick_and_set("box", "cover image")
 
@@ -333,7 +359,7 @@ class BoxartGUI(tk.Tk):
     def _do_set(self, g, img, kind):
         with tempfile.TemporaryDirectory() as td:
             self.bx.set_art(g.rom, img, td, kind=kind)
-        self.bx.adb.restart_nano()
+        self.bx.adb.refresh_nano()
         self._load_games()
         self.after(0, lambda: self._set_status("Set %s for %s" % (
             "background" if kind == "fan" else "cover", g.display)))
@@ -365,7 +391,7 @@ class BoxartGUI(tk.Tk):
     def _do_remove(self, g, kind):
         with tempfile.TemporaryDirectory() as td:
             self.bx.remove_art(g.rom, td, kind=kind)
-        self.bx.adb.restart_nano()
+        self.bx.adb.refresh_nano()
         self._load_games()
 
     def save_cover_as(self):
@@ -392,7 +418,7 @@ class BoxartGUI(tk.Tk):
         with tempfile.TemporaryDirectory() as td:
             applied, _ = self.bx.import_dir(d, td, mode="auto")
         if applied:
-            self.bx.adb.restart_nano()
+            self.bx.adb.refresh_nano()
             self._load_games()
         self.after(0, lambda: self._set_status("Imported %d covers" % applied))
 
@@ -603,7 +629,7 @@ class BoxartGUI(tk.Tk):
                 err = str(e)
             if matched:
                 try:
-                    self.bx.adb.restart_nano()
+                    self.bx.adb.refresh_nano()
                 except Exception:  # noqa: BLE001
                     pass
                 self._load_games()
@@ -782,7 +808,7 @@ class BoxartGUI(tk.Tk):
             def work():
                 applied = self._apply_from_result(g.rom, r, kinds)
                 if applied:
-                    self.bx.adb.restart_nano()
+                    self.bx.adb.refresh_nano()
                     self._load_games()
                 self.after(0, lambda: self._set_status(
                     ("Applied " + ", ".join("background" if k == "fan" else "cover" for k in applied))

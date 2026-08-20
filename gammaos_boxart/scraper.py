@@ -18,6 +18,7 @@ Both expose the same interface:
   fetch_media(candidate, want_box, want_fan) -> ScrapeResult              (a chosen result)
 """
 
+import html
 import json
 import urllib.parse
 import urllib.request
@@ -119,6 +120,14 @@ class ScrapeResult:
         self.box = None
         self.fan = None
         self.error = ""
+        # Rich metadata for Nano's Information page (parity with the on-device scraper).
+        self.desc = ""
+        self.genre = ""
+        self.players = ""
+        self.rating = ""
+        self.date = ""
+        self.dev = ""
+        self.pub = ""
 
     @property
     def got_any(self):
@@ -286,6 +295,7 @@ class ScreenScraper:
         res = ScrapeResult()
         res.matched = True
         res.title = self._pick_title(jeu.get("noms"))
+        self._parse_meta(jeu, res)
         medias = jeu.get("medias")
         if not isinstance(medias, list):
             res.error = "no media"
@@ -318,6 +328,52 @@ class ScreenScraper:
                     return m["url"]
         return None
 
+    def _parse_meta(self, jeu, res):
+        def langtext(arr):
+            if not isinstance(arr, list) or not arr:
+                return ""
+            first = picked = ""
+            for o in arr:
+                tx = o.get("text", "")
+                if not first:
+                    first = tx
+                if o.get("langue") == "en" and not picked:
+                    picked = tx
+            return picked or first
+
+        res.desc = html.unescape(langtext(jeu.get("synopsis")))
+        genres = jeu.get("genres")
+        if isinstance(genres, list) and genres:
+            gp = genres[0]
+            for gg in genres:
+                if gg.get("principale") == "1":
+                    gp = gg
+                    break
+            res.genre = html.unescape(langtext(gp.get("noms")))
+        jo = jeu.get("joueurs")
+        if isinstance(jo, dict):
+            res.players = html.unescape(jo.get("text", ""))
+        nt = jeu.get("note")
+        if isinstance(nt, dict) and nt.get("text"):
+            res.rating = nt["text"] + "/20"
+        ds = jeu.get("dates")
+        if isinstance(ds, list) and ds:
+            regs = set(region_order(self.region))
+            first = picked = ""
+            for d in ds:
+                tx = d.get("text", "")
+                if not first:
+                    first = tx
+                if d.get("region") in regs and not picked:
+                    picked = tx
+            res.date = html.unescape(picked or first)
+        dv = jeu.get("developpeur")
+        if isinstance(dv, dict):
+            res.dev = html.unescape(dv.get("text", ""))
+        ed = jeu.get("editeur")
+        if isinstance(ed, dict):
+            res.pub = html.unescape(ed.get("text", ""))
+
     def _pick_title(self, noms):
         if not isinstance(noms, list) or not noms:
             return ""
@@ -343,6 +399,36 @@ class TheGamesDB:
         self.apikey = (apikey or "").strip()
         self.region = region
         self.timeout = timeout
+        self._res = None   # cached genre/developer/publisher id->name maps
+
+    def _ensure_res(self):
+        if self._res is not None:
+            return
+        self._res = {}
+        for kind, ep in (("genres", "Genres"), ("developers", "Developers"),
+                         ("publishers", "Publishers")):
+            m = {}
+            try:
+                body = _http_get("https://api.thegamesdb.net/v1/" + ep,
+                                 [("apikey", self.apikey)], timeout=self.timeout)
+                d = (json.loads(body).get("data") or {}).get(kind) or {}
+                for k, v in d.items():
+                    if isinstance(v, dict) and v.get("name"):
+                        m[str(v.get("id", k))] = v["name"]
+            except Exception:
+                pass
+            self._res[kind] = m
+
+    def _res_name(self, kind, ids):
+        if not ids:
+            return ""
+        self._ensure_res()
+        m = self._res.get(kind, {})
+        for i in (ids if isinstance(ids, list) else [ids]):
+            n = m.get(str(i))
+            if n:
+                return html.unescape(n)
+        return ""
 
     @property
     def ready(self):
@@ -405,6 +491,17 @@ class TheGamesDB:
         res = ScrapeResult()
         res.matched = True
         res.title = cand.title
+        g = cand.raw if isinstance(cand.raw, dict) else {}
+        res.desc = html.unescape(g.get("overview") or "")
+        if g.get("players"):
+            res.players = str(g["players"])
+        if g.get("rating"):
+            res.rating = html.unescape(str(g["rating"]))
+        rd = g.get("release_date") or ""
+        res.date = rd[:10] if rd else ""
+        res.genre = self._res_name("genres", g.get("genres"))
+        res.dev = self._res_name("developers", g.get("developers"))
+        res.pub = self._res_name("publishers", g.get("publishers"))
         try:
             body = _http_get(TGDB_IMAGES_URL,
                              [("apikey", self.apikey), ("games_id", str(cand.ident))],

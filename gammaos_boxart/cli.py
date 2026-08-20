@@ -72,7 +72,7 @@ def cmd_set(args):
         print("key : %s" % cache_key(rom))
         print("%s -> %s" % (ART[kind]["label"], dest))
         if not args.no_restart:
-            bx.adb.restart_nano()
+            bx.adb.refresh_nano()
             print("restarted Nano")
         else:
             print("run with a Nano restart to see it (or: adb shell setprop ctl.stop gammaos-nano; setprop ctl.start gammaos-nano)")
@@ -86,7 +86,7 @@ def cmd_remove(args):
         ok = bx.remove_art(args.rom, td, kind=kind)
         print("removed %s" % what if ok else "nothing was set")
         if not args.no_restart:
-            bx.adb.restart_nano()
+            bx.adb.refresh_nano()
             print("restarted Nano")
 
 
@@ -102,7 +102,7 @@ def cmd_import(args):
         applied, _ = bx.import_dir(args.dir, td, mode=args.match, progress=_bar("import"))
         print("\nimported %d covers" % applied)
         if applied and not args.no_restart:
-            bx.adb.restart_nano()
+            bx.adb.refresh_nano()
             print("restarted Nano")
 
 
@@ -145,7 +145,7 @@ def cmd_scrape(args):
             print("matched '%s' -> %s" % (r.get("title") or "?",
                                           ", ".join(ART[k]["label"] for k in got) or "no new art"))
         if (r.get("box") or r.get("fan")) and not args.no_restart:
-            bx.adb.restart_nano()
+            bx.adb.refresh_nano()
             print("restarted Nano")
 
 
@@ -174,8 +174,22 @@ def cmd_scrape_all(args):
             overwrite=args.overwrite, use_crc=not args.no_crc, progress=prog)
     print("\nscraped art for %d of %d games" % (matched, scanned))
     if matched and not args.no_restart:
-        bx.adb.restart_nano()
+        bx.adb.refresh_nano()
         print("restarted Nano")
+
+
+def cmd_title(args):
+    bx = Boxart(_adb(args))
+    with tempfile.TemporaryDirectory() as td:
+        rom = bx.canonical_rom(args.rom)
+        name = bx.set_name(rom, args.name, td)
+        if name:
+            print("title of %s -> %s" % (rom, name))
+        else:
+            print("cleared custom title of %s" % rom)
+        if not args.no_restart:
+            bx.adb.refresh_nano()
+            print("restarted Nano")
 
 
 def cmd_restart(args):
@@ -276,6 +290,12 @@ def build_parser():
     p.add_argument("system", nargs="?", help="optional system to limit to (e.g. nes)")
     _add_scrape_opts(p)
     p.set_defaults(func=cmd_scrape_all)
+
+    p = sub.add_parser("title", help="set or clear a game's displayed title (even after scraping)")
+    p.add_argument("rom", help="ROM path or 'system/file'")
+    p.add_argument("name", nargs="?", default="", help="the new title (omit or empty to clear the override)")
+    p.add_argument("--no-restart", action="store_true")
+    p.set_defaults(func=cmd_title)
 
     sub.add_parser("restart", help="restart Nano so on-disk changes load").set_defaults(func=cmd_restart)
 

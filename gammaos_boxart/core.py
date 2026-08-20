@@ -74,6 +74,7 @@ class Adb:
     def __init__(self, serial=None, adb="adb"):
         self.serial = serial
         self.adb = adb
+        self._reload_ok = None   # None = unprobed, True/False = nano reload support
 
     def _base(self):
         cmd = [self.adb]
@@ -174,11 +175,48 @@ class Adb:
     def rm(self, remote):
         self.sh("rm -f %s" % _q(remote), check=False)
 
+    NANO_SERVICES = ("gammaos-nano-overlay", "gammaos-nano")
+
+    def nano_service(self):
+        """The nano init service that is actually running (overlay or plain)."""
+        for svc in self.NANO_SERVICES:
+            if self.sh("getprop init.svc.%s" % svc, check=False).strip() == "running":
+                return svc
+        return "gammaos-nano"
+
     def restart_nano(self, wait=3.0):
-        self.sh("setprop ctl.stop gammaos-nano", check=False)
-        time.sleep(0.6)
-        self.sh("setprop ctl.start gammaos-nano", check=False)
+        """Restart the running nano service so it reloads on-disk changes."""
+        svc = self.nano_service()
+        self.sh("setprop ctl.restart %s" % svc, check=False)
         time.sleep(wait)
+
+    def reload_nano(self, timeout=2.5):
+        """Ask a running nano to reload the boxart manifest in place (no restart).
+
+        Returns True if nano acknowledged (build supports it), else False so the
+        caller can fall back to a restart.
+        """
+        token = str(int(time.time() * 1000))
+        self.sh("setprop sys.gammaos.nano.scrape_reload %s" % token, check=False)
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if self.sh("getprop sys.gammaos.nano.scrape_reload_ack", check=False).strip() == token:
+                return True
+            time.sleep(0.1)
+        return False
+
+    def refresh_nano(self):
+        """Show on-disk boxart changes: a light in-place reload if nano supports it,
+        otherwise a full service restart. The reload-support result is probed once
+        per session so an older nano is not made to wait for an ack every time."""
+        if self._reload_ok is False:
+            self.restart_nano()
+            return
+        if self.reload_nano():
+            self._reload_ok = True
+            return
+        self._reload_ok = False
+        self.restart_nano()
 
 
 def _q(s):
@@ -437,6 +475,34 @@ class Boxart:
             self.write_index(idx, tmpdir)
         return removed
 
+    def write_names(self, names_map, tmpdir):
+        obj = {"version": 1,
+               "items": [{"rom": r, "name": n} for r, n in names_map.items() if n]}
+        local = os.path.join(tmpdir, "names.json")
+        with open(local, "w", encoding="utf-8") as f:
+            json.dump(obj, f, ensure_ascii=False, indent=1)
+        self.adb.put_file(local, NAMES_PATH)
+
+    def set_name(self, rom, name, tmpdir):
+        """Set (or clear, if name is empty) a game's title. Written to names.json, the
+        override Nano shows above any scraped title, so it works even after scraping;
+        the manifest title is updated too for consistency."""
+        rom = self.canonical_rom(rom)
+        key = _norm(rom)
+        names = {r: n for r, n in self.read_names().items() if _norm(r) != key}
+        if name:
+            names[rom] = name
+        self.write_names(names, tmpdir)
+        idx = self.read_index()
+        it = self.find_entry(idx, rom)
+        if name:
+            if it is None:
+                it = {"rom": rom}
+                idx["items"].append(it)
+            it["title"] = name
+            self.write_index(idx, tmpdir)
+        return name
+
     # backward-compatible cover helpers
     def get_cover(self, rom, out_path):
         return self.get_art(rom, out_path, "box")
@@ -558,19 +624,41 @@ class Boxart:
         return self._apply_result(rom, tmpdir, result, getattr(scraper, "name", "screenscraper"))
 
     def _apply_result(self, rom, tmpdir, result, source):
+        """Push the scraped art and write the title + rich metadata to index.json in
+        one update (parity with Nano's on-device scraper: desc/genre/players/rating/
+        date/dev/pub feed the Information page). rom must already be canonical."""
         out = {"matched": result.matched, "skipped": False, "box": False,
                "fan": False, "title": result.title, "error": result.error}
         if not result.matched:
             return out
+        idx = self.read_index()
+        it = self.find_entry(idx, rom)
+        if it is None:
+            it = {"rom": rom}
+            idx["items"].append(it)
+        self.adb.sh("mkdir -p %s" % _q(NANO_DIR), check=False)
         for kind, data in (("box", result.box), ("fan", result.fan)):
             if not data:
                 continue
+            dest = "%s/%s.%s" % (NANO_DIR, cache_key(rom), ART[kind]["ext"])
             local = os.path.join(tmpdir, "%s.%s" % (cache_key(rom), ART[kind]["ext"]))
             with open(local, "wb") as f:
                 f.write(data)
-            self.set_art(rom, local, tmpdir, kind=kind,
-                         title=result.title or None, scraper=source)
+            self.adb.put_file(local, dest)
+            it[ART[kind]["field"]] = dest
             out[kind] = True
+        if result.title:
+            it["title"] = result.title
+        elif not it.get("title"):
+            it["title"] = os.path.splitext(posixpath.basename(rom))[0]
+        for field, value in (("desc", result.desc), ("genre", result.genre),
+                             ("players", result.players), ("rating", result.rating),
+                             ("date", result.date), ("dev", result.dev), ("pub", result.pub)):
+            if value:
+                it[field] = value
+        it["scraper"] = source
+        it["when"] = int(time.time())
+        self.write_index(idx, tmpdir)
         return out
 
     def apply_candidate(self, rom, scraper, candidate, tmpdir,
